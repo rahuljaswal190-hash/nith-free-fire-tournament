@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NIT Hamirpur Free Fire Tournament | Student Registration Portal</title>
+  <meta name="description" content="Student-organized Free Fire tournament website for NIT Hamirpur with Clash Squad, Battle Royale, slots, rules and leaderboard." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-page="home" id="top">
+<header class="site-header">
+  <a class="brand" href="index.html" aria-label="NIT Hamirpur Free Fire Tournament home">
+    <span class="brand-mark">NITH</span>
+    <span><strong data-event="shortName">NITH Free Fire Tournament</strong><small>Student-organized portal</small></span>
+  </a>
+  <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
+  <nav class="main-nav" aria-label="Main navigation">
+    <a href="index.html" data-nav="home">Home</a>
+    <a href="clash-squad.html" data-nav="clash">Clash Squad</a>
+    <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
+    <a href="rules.html" data-nav="rules">Rules</a>
+    <a href="leaderboard.html" data-nav="leaderboard">Leaderboard</a>
+    <a href="schedule-results.html" data-nav="schedule">Schedule</a>
+    <a href="admin.html" data-nav="admin">Admin</a>
+  </nav>
+</header>
+<div class="notice-ticker"><div id="notice-strip"></div></div>
+
+<main>
+  <section class="hero">
+    <div class="reveal">
+      <span class="eyebrow"><span class="pulse-dot"></span> Student-organized · NIT Hamirpur</span>
+      <h1><span>Free Fire</span> tournament portal for NIT Hamirpur players.</h1>
+      <p class="hero-lead">Register solo, duo, trio or squad Battle Royale entries, join Clash Squad, choose a fee tier, check room availability, follow rules, and track leaderboard updates from one trusted tournament portal.</p>
+      <div class="hero-actions">
+        <a class="btn" href="clash-squad.html">Register Clash Squad</a>
+        <a class="btn ghost" href="battle-royale.html">Register Battle Royale</a>
+        <a class="btn ghost" href="leaderboard.html">View Leaderboard</a>
+      </div>
+      <p class="disclaimer">No “Free” lobby is shown now. Entry tiers are ₹20, ₹40, ₹60, ₹80 and ₹100. Solo fee is per player; Duo, Trio, Squad and Clash Squad fee is per team. Prize pool is entry-based and may vary with confirmed entries.</p>
+    </div>
+    <aside class="hero-card reveal delay-1" aria-label="Tournament dashboard preview">
+      <div class="card-line"><span>REGISTRATION PORTAL</span><b>BOOYAH</b></div>
+      <div class="trophy"><div><span>▲</span><strong>NITH ARENA</strong><small>BR + CLASH SQUAD</small></div></div>
+      <div class="card-metrics">
+        <div><strong>Solo</strong><span>Play without a team</span></div>
+        <div><strong>Duo/Trio</strong><span>Small-team formats</span></div>
+        <div><strong>Squad</strong><span>Full-team battles</span></div>
+      </div>
+    </aside>
+  </section>
+
+  <section class="section">
+    <div class="section-head reveal">
+      <span class="eyebrow">Live availability</span>
+      <h2>Slots players can understand instantly</h2>
+      <p>Battle Royale has Solo, Duo, Trio and Squad sections. Solo lobbies have 48 players, Duo has 24 teams, Trio has 16 teams, and Squad has 12 teams. Clash Squad rooms have 2 teams and 1 match. Counts are final only after admin confirmation.</p>
+    </div>
+    <div class="stats-grid" id="home-slot-summary"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head reveal">
+      <span class="eyebrow">Battle Royale formats</span>
+      <h2>Players can join even without a full squad</h2>
+      <p>Separate sections are available for Solo, Duo, Trio and Squad, so a player alone or with a small group can still participate.</p>
+    </div>
+    <div class="format-grid" id="home-format-grid"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head reveal">
+      <span class="eyebrow">Choose mode</span>
+      <h2>Separate pages for every important thing</h2>
+    </div>
+    <div class="mode-grid">
+      <article class="mode-card reveal">
+        <span class="mode-icon">CS</span>
+        <h3>Clash Squad</h3>
+        <p>Choose Normal or One Tap. Each room has two teams and one match; winner is rewarded after verification.</p>
+        <ul><li>2 teams per custom room</li><li>1 match only</li><li>₹20 to ₹100 per team</li></ul>
+        <a class="btn small" href="clash-squad.html">Open Clash Squad Page</a>
+      </article>
+      <article class="mode-card reveal delay-1">
+        <span class="mode-icon blue">BR</span>
+        <h3>Battle Royale</h3>
+        <p>Choose Solo, Duo, Trio or Squad. Three matches are played and the top 3 entries/teams are selected based on cumulative points.</p>
+        <ul><li>Solo, Duo, Trio, Squad sections</li><li>3 matches per lobby</li><li>Top 3 entries/teams selected</li></ul>
+        <a class="btn small" href="battle-royale.html">Open Battle Royale Page</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head reveal">
+      <span class="eyebrow">Fee tiers</span>
+      <h2>Entry starts at ₹20</h2>
+      <p>All fee tiers have custom rooms. Solo fee is per player; Duo/Trio/Squad and Clash Squad fee is per team. Battle Royale target rewards are shown for full confirmed lobbies; final prize may vary according to confirmed entries and organizer announcement.</p>
+    </div>
+    <div class="fee-grid" id="home-fee-grid"></div>
+  </section>
+</main>
+<footer class="footer">
+  <div>
+    <strong data-event="name">NIT Hamirpur Free Fire Tournament</strong>
+    <p>Built for clear registration, visible slots, trusted rules, and transparent results.</p>
+    <p class="disclaimer" data-event="disclaimer"></p>
+  </div>
+  <a href="#top">Back to top ↑</a>
+</footer>
+<script src="data.js"></script>
+<script src="site.js"></script>
+</body>
+</html>
