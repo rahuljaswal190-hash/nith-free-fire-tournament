@@ -63,7 +63,7 @@
       supportChannel: "Official WhatsApp group/contact to be added",
       whatsappNumber: "",
       upiId: "yourupi@bank",
-      adminPin: "2026",
+      adminPin: "2020",
       disclaimer: "This is a student-organized tournament portal for a Free Fire event around NIT Hamirpur. It is not affiliated with, endorsed by, or sponsored by Garena or Free Fire. Use institute-official wording only after proper permission."
     },
     economics: {
