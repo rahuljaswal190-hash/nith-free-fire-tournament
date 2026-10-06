@@ -94,13 +94,28 @@
       { time: "After verification", title: "Leaderboard and payout", detail: "Scores are updated after screenshots/recordings and fair-play checks." }
     ],
     publishedState: {
-      roomOverrides: {},
-      leaderboard: { br: [], cs: [] },
-      notices: [
-        "Slots shown are admin-confirmed or locally held. Final slot is valid only after organizer confirmation.",
-        "Solo, Duo, Trio and Squad Battle Royale sections are available for players with or without a full team.",
-        "Room ID/password will never be posted publicly on this website."
-      ]
-    }
-  };
+      {
+  "roomOverrides": {},
+  "leaderboard": {
+    "br": [
+      {
+        "id": "LB-1791291811858",
+        "teamName": "Team",
+        "fee": 20,
+        "roomId": "778382892",
+        "updatedAt": "2026-10-06T13:03:31.858Z",
+        "format": "solo",
+        "formatLabel": "Solo",
+        "matchesPlayed": 3,
+        "booyah": 1,
+        "placementPoints": 25,
+        "kills": 25,
+        "penalty": 0
+      }
+    ],
+    "cs": []
+  },
+  "notices": [],
+  "exportedAt": "2026-10-06T13:04:31.926Z"
+};
 })();
