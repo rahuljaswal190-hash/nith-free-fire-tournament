@@ -2,6 +2,11 @@ const DATA = window.TOURNAMENT_DATA;
 const STATE_KEY = "nithFreeFireTournamentStateV3";
 let toastTimer;
 let lastSummary = "";
+let SERVER_AVAILABLE = false;
+let SERVER_STATE = null;
+let currentAdminPin = "";
+let liveSyncTimer = null;
+let ADMIN_REGISTRATIONS = [];
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => Array.from(scope.querySelectorAll(selector));
@@ -16,21 +21,27 @@ function defaultState() {
   };
 }
 
+function normalizeState(raw = {}) {
+  const base = defaultState();
+  return {
+    ...base,
+    ...raw,
+    registrations: Array.isArray(raw.registrations) ? raw.registrations : [],
+    registrationCounts: raw.registrationCounts || {},
+    roomOverrides: raw.roomOverrides || {},
+    roomDetails: raw.roomDetails || {},
+    leaderboard: {
+      br: Array.isArray(raw.leaderboard?.br) ? raw.leaderboard.br : [],
+      cs: Array.isArray(raw.leaderboard?.cs) ? raw.leaderboard.cs : []
+    },
+    notices: Array.isArray(raw.notices) ? raw.notices : []
+  };
+}
+
 function loadState() {
+  if (SERVER_AVAILABLE && SERVER_STATE) return normalizeState(SERVER_STATE);
   try {
-    const parsed = JSON.parse(localStorage.getItem(STATE_KEY) || "{}");
-    const base = defaultState();
-    return {
-      ...base,
-      ...parsed,
-      registrations: Array.isArray(parsed.registrations) ? parsed.registrations : [],
-      roomOverrides: parsed.roomOverrides || {},
-      leaderboard: {
-        br: Array.isArray(parsed.leaderboard?.br) ? parsed.leaderboard.br : [],
-        cs: Array.isArray(parsed.leaderboard?.cs) ? parsed.leaderboard.cs : []
-      },
-      notices: Array.isArray(parsed.notices) ? parsed.notices : []
-    };
+    return normalizeState(JSON.parse(localStorage.getItem(STATE_KEY) || "{}"));
   } catch (error) {
     console.warn("State parse failed", error);
     return defaultState();
@@ -41,6 +52,31 @@ function saveState(state) {
   state.updatedAt = new Date().toISOString();
   localStorage.setItem(STATE_KEY, JSON.stringify(state));
 }
+
+async function refreshStateFromServer() {
+  try {
+    const response = await fetch(`/api/state?ts=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`State API ${response.status}`);
+    SERVER_STATE = await response.json();
+    SERVER_AVAILABLE = true;
+    return true;
+  } catch (error) {
+    SERVER_AVAILABLE = false;
+    return false;
+  }
+}
+
+async function apiPost(path, payload) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) throw new Error(data.error || `Request failed (${response.status})`);
+  return data;
+}
+
 
 function published() {
   return DATA.publishedState || { roomOverrides: {}, leaderboard: { br: [], cs: [] }, notices: [] };
@@ -57,6 +93,12 @@ function getRooms({ mode, fee, variant, format } = {}) {
 }
 
 
+function getFeeTiers(mode) {
+  if (mode === "cs") return DATA.economics.csFeeTiers || DATA.economics.feeTiers;
+  if (mode === "br") return DATA.economics.brFeeTiers || DATA.economics.feeTiers;
+  return DATA.economics.feeTiers;
+}
+
 function getRoom(roomId) {
   return DATA.rooms.find((room) => room.id === roomId);
 }
@@ -64,6 +106,11 @@ function getRoom(roomId) {
 function localRegistrationsForRoom(roomId) {
   const state = loadState();
   return state.registrations.filter((entry) => entry.roomId === roomId && entry.localSlotHeld !== false);
+}
+
+function registrationCountForRoom(roomId) {
+  const state = loadState();
+  return Number(state.registrationCounts?.[roomId] || 0);
 }
 
 function getConfirmedBase(room) {
@@ -75,6 +122,9 @@ function getConfirmedBase(room) {
 
 function getConfirmedTeams(room) {
   const baseConfirmed = getConfirmedBase(room);
+  if (SERVER_AVAILABLE) {
+    return Math.min(room.capacity, Math.max(0, baseConfirmed, registrationCountForRoom(room.id)));
+  }
   const localHeld = localRegistrationsForRoom(room.id).length;
   return Math.min(room.capacity, Math.max(0, baseConfirmed + localHeld));
 }
@@ -145,18 +195,39 @@ function updateDynamicRoster(form) {
     row.classList.toggle("hidden", !active);
     $$('input', row).forEach((input) => {
       input.disabled = !active;
-      if (input.name?.endsWith("Ign") || input.name?.endsWith("Uid")) input.required = active;
+      if (input.name?.endsWith("Ign") || input.name?.endsWith("Uid") || input.name?.endsWith("Name")) input.required = active;
     });
   });
 }
 
-function pageInit() {
+async function pageInit() {
+  await refreshStateFromServer();
   setupNavigation();
   renderGlobalEventText();
   renderNotices();
   renderPage();
   setupCommonRegistration();
   setupModal();
+  startLiveSync();
+}
+
+function startLiveSync() {
+  if (liveSyncTimer) clearInterval(liveSyncTimer);
+  liveSyncTimer = setInterval(async () => {
+    if (!SERVER_AVAILABLE) return;
+    const page = document.body.dataset.page;
+    const livePages = ["home", "leaderboard", "rooms", "dashboard", "schedule"];
+    if (!livePages.includes(page)) return;
+    const ok = await refreshStateFromServer();
+    if (ok) {
+      renderNotices();
+      if (page === "dashboard" && currentAdminPin) {
+        renderDashboardData().catch(() => {});
+      } else {
+        renderPage();
+      }
+    }
+  }, 5000);
 }
 
 function setupNavigation() {
@@ -197,12 +268,15 @@ function renderPage() {
   if (page === "clash") renderClashPage();
   if (page === "battle") renderBattlePage();
   if (page === "leaderboard") renderLeaderboardPage();
+  if (page === "rooms") renderRoomDetailsPage();
   if (page === "schedule") renderSchedulePage();
   if (page === "admin") setupAdminPage();
+  if (page === "dashboard") setupDashboardPage();
 }
 
 function renderHome() {
-  const totals = DATA.economics.feeTiers.map((fee) => {
+  const allFeeTiers = Array.from(new Set([...getFeeTiers("br"), ...getFeeTiers("cs")])).sort((a, b) => a - b);
+  const totals = allFeeTiers.map((fee) => {
     const brRooms = getRooms({ mode: "br", fee });
     const csRooms = getRooms({ mode: "cs", fee });
     const brSlots = brRooms.reduce((sum, room) => sum + slotsLeft(room), 0);
@@ -247,14 +321,14 @@ function renderHome() {
           <strong>${formatFee(row.fee)}</strong>
           <span>per entry/team</span>
         </div>
-        <p>Battle Royale target reward pool: <b>${formatFee(brProjectedPrize(row.fee))}</b> when lobby conditions are met. Solo fee is per player; Duo/Trio/Squad fee is per team.</p>
+        <p>${row.brSlots > 0 ? `Battle Royale target reward pool: <b>${formatFee(brProjectedPrize(row.fee))}</b> when lobby conditions are met.` : `Clash Squad tier available from <b>${formatFee(row.fee)}</b>.`} Solo fee is per player; Duo/Trio/Squad and Clash Squad fee is per team.</p>
         <div class="mini-bars">
           <span>BR slots <b>${row.brSlots}</b></span>
           <span>CS slots <b>${row.csSlots}</b></span>
         </div>
         <div class="fee-actions">
-          <a href="battle-royale.html?fee=${row.fee}" class="mini-link">Battle Royale</a>
-          <a href="clash-squad.html?fee=${row.fee}" class="mini-link">Clash Squad</a>
+          ${row.brSlots > 0 ? `<a href="battle-royale.html?fee=${row.fee}" class="mini-link">Battle Royale</a>` : `<span class="mini-link muted-link">No BR tier</span>`}
+          ${row.csSlots > 0 ? `<a href="clash-squad.html?fee=${row.fee}" class="mini-link">Clash Squad</a>` : `<span class="mini-link muted-link">CS starts ₹50</span>`}
         </div>
       </article>
     `).join("");
@@ -264,10 +338,10 @@ function renderHome() {
 
 function renderClashPage() {
   const params = new URLSearchParams(location.search);
-  const defaultFee = Number(params.get("fee")) || DATA.economics.feeTiers[0];
+  const defaultFee = Number(params.get("fee")) || getFeeTiers("cs")[0];
   const tierFilter = $("#cs-tier-filter");
   const variantFilter = $("#cs-variant-filter");
-  if (tierFilter) populateFeeSelect(tierFilter, defaultFee);
+  if (tierFilter) populateFeeSelect(tierFilter, defaultFee, "cs");
   if (variantFilter && !variantFilter.value) variantFilter.value = "Normal";
 
   const formVariant = $("#cs-form-variant");
@@ -294,12 +368,12 @@ function renderClashPage() {
 
 function renderBattlePage() {
   const params = new URLSearchParams(location.search);
-  const defaultFee = Number(params.get("fee")) || DATA.economics.feeTiers[0];
+  const defaultFee = Number(params.get("fee")) || getFeeTiers("br")[0];
   const defaultFormat = params.get("format") || "solo";
   const tierFilter = $("#br-tier-filter");
   const formatFilter = $("#br-format-filter");
   const formFormat = $("#br-form-format");
-  if (tierFilter) populateFeeSelect(tierFilter, defaultFee);
+  if (tierFilter) populateFeeSelect(tierFilter, defaultFee, "br");
   populateFormatSelect(formatFilter, defaultFormat);
   populateFormatSelect(formFormat, defaultFormat);
 
@@ -374,10 +448,11 @@ function renderModeStats(selector, rooms) {
 }
 
 
-function populateFeeSelect(select, selectedFee) {
+function populateFeeSelect(select, selectedFee, mode = "br") {
   if (!select) return;
-  select.innerHTML = DATA.economics.feeTiers.map((fee) => `<option value="${fee}" ${Number(selectedFee) === fee ? "selected" : ""}>${formatFee(fee)}</option>`).join("");
+  select.innerHTML = getFeeTiers(mode).map((fee) => `<option value="${fee}" ${Number(selectedFee) === fee ? "selected" : ""}>${formatFee(fee)}</option>`).join("");
 }
+
 
 function populateRoomSelect(selector, rooms) {
   const select = $(selector);
@@ -423,7 +498,7 @@ function renderRoomCards(selector, rooms) {
 
 function setupCommonRegistration() {
   $$("[data-registration-form]").forEach((form) => {
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const mode = form.dataset.mode;
       const data = readRegistrationForm(form, mode);
@@ -432,17 +507,27 @@ function setupCommonRegistration() {
         toast(error, true);
         return;
       }
-      const state = loadState();
-      state.registrations.unshift(data);
-      saveState(state);
+      const result = await submitRegistration(data);
       lastSummary = buildRegistrationSummary(data);
       showSuccess(lastSummary, data);
       form.reset();
+      await refreshStateFromServer();
       renderPage();
       updateDynamicRoster(form);
-      toast("Registration saved on this device. Final slot needs admin confirmation.");
+      toast(result.message || "Registration saved. Final slot needs admin confirmation.");
     });
   });
+}
+
+async function submitRegistration(data) {
+  if (SERVER_AVAILABLE) {
+    const result = await apiPost("/api/register", data);
+    return { message: result.message || "Registration saved on live server." };
+  }
+  const state = loadState();
+  state.registrations.unshift(data);
+  saveState(state);
+  return { message: "Registration saved on this device. Final slot needs admin confirmation." };
 }
 
 function readRegistrationForm(form, mode) {
@@ -451,14 +536,18 @@ function readRegistrationForm(form, mode) {
   const room = getRoom(roomId);
   const now = new Date();
   const requiredPlayers = mode === "br" ? Number(room?.playersPerEntry || 1) : 4;
-  const players = [];
-  for (let index = 1; index <= requiredPlayers; index += 1) {
+  const iglName = clean(fd.get("iglName")) || clean(fd.get("p1Ign"));
+  const iglUid = clean(fd.get("iglUid")) || clean(fd.get("p1Uid"));
+  const players = [{ ign: iglName, uid: iglUid }];
+  for (let index = 2; index <= requiredPlayers; index += 1) {
     players.push({
-      ign: clean(fd.get(`p${index}Ign`)),
+      ign: clean(fd.get(`p${index}Name`)) || clean(fd.get(`p${index}Ign`)),
       uid: clean(fd.get(`p${index}Uid`)),
-      roll: clean(fd.get(`p${index}Roll`))
+      roll: ""
     });
   }
+  const typedTeamName = clean(fd.get("teamName"));
+  const fallbackTeamName = requiredPlayers === 1 ? iglName : (iglName ? `${iglName}'s Team` : "");
   return {
     id: generateRegistrationId(mode),
     mode,
@@ -471,17 +560,16 @@ function readRegistrationForm(form, mode) {
     fee: Number(room?.fee || fd.get("feeTier") || 0),
     feeRule: feeRuleLabel(room || battleFormatById(clean(fd.get("format")))),
     variant: room?.variant || clean(fd.get("variant")),
-    teamName: clean(fd.get("teamName")),
-    captainName: clean(fd.get("captainName")),
+    teamName: typedTeamName || fallbackTeamName,
+    captainName: iglName,
+    iglName,
+    iglUid,
     whatsapp: clean(fd.get("whatsapp")),
-    institution: clean(fd.get("institution")),
-    rollNumber: clean(fd.get("rollNumber")),
-    email: clean(fd.get("email")),
     paymentRef: clean(fd.get("paymentRef")),
     players,
     acceptedRules: Boolean(fd.get("acceptedRules")),
     localSlotHeld: true,
-    status: "Pending organizer verification",
+    status: "Pending",
     submittedAt: now.toISOString(),
     submittedAtDisplay: now.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
   };
@@ -489,7 +577,7 @@ function readRegistrationForm(form, mode) {
 
 
 function validateRegistration(data) {
-  if (!data.teamName || !data.captainName || !data.whatsapp) return "Please enter team name, captain name, and WhatsApp number.";
+  if (!data.iglName || !data.iglUid || !data.whatsapp) return "Please enter IGL/player name, Free Fire ID, and WhatsApp number.";
   const digits = data.whatsapp.replace(/\D/g, "");
   if (digits.length < 10 || digits.length > 13) return "Enter a valid WhatsApp number.";
   const room = getRoom(data.roomId);
@@ -515,21 +603,23 @@ function generateRegistrationId(mode) {
 function buildRegistrationSummary(data) {
   const players = data.players.map((player, index) => `${index + 1}. ${player.ign} | UID: ${player.uid}${player.roll ? ` | Roll: ${player.roll}` : ""}`).join("\n");
   const modeExtra = data.mode === "br" ? ` (${data.formatLabel || data.format || "Format"})` : (data.variant ? ` (${data.variant})` : "");
-  return `${DATA.event.name}\n` +
-    `Registration ID: ${data.id}\n` +
-    `Status: ${data.status}\n` +
-    `Mode: ${data.modeLabel}${modeExtra}\n` +
-    `Room: ${data.roomTitle} (${data.roomId})\n` +
-    `Team/Entry Name: ${data.teamName}\n` +
-    `Captain: ${data.captainName}\n` +
-    `WhatsApp: ${data.whatsapp}\n` +
-    `Institution: ${data.institution || "Not provided"}\n` +
-    `Roll No: ${data.rollNumber || "N/A"}\n` +
-    `Entry Fee: ${formatFee(data.fee)} ${data.feeRule || "per entry/team"}\n` +
-    `Payment Ref: ${data.paymentRef}\n\n` +
-    `Players:\n${players}\n\n` +
-    `Submitted: ${data.submittedAtDisplay}\n` +
-    `Note: Final slot is confirmed only after organizer verification.`;
+  return [
+    DATA.event.name,
+    `Registration ID: ${data.id}`,
+    `Status: ${data.status}`,
+    `Mode: ${data.modeLabel}${modeExtra}`,
+    `Room: ${data.roomTitle} (${data.roomId})`,
+    `Team/Entry Name: ${data.teamName}`,
+    `IGL/Player: ${data.iglName || data.captainName} | ID: ${data.iglUid || "N/A"}`,
+    `WhatsApp: ${data.whatsapp}`,
+    `Entry Fee: ${formatFee(data.fee)} ${data.feeRule || "per entry/team"}`,
+    `Payment Ref: ${data.paymentRef}`,
+    "",
+    `Players:\n${players}`,
+    "",
+    `Submitted: ${data.submittedAtDisplay}`,
+    "Note: Final slot is confirmed only after organizer verification."
+  ].join("\n");
 }
 
 
@@ -623,6 +713,60 @@ function renderLeaderboards(selector, mode) {
 }
 
 
+function renderRoomDetailsPage() {
+  const container = $("#room-details-grid");
+  if (!container) return;
+  const state = loadState();
+  const details = state.roomDetails || {};
+  const publishedRooms = Object.values(details).filter((detail) => detail && detail.published);
+  if (!publishedRooms.length) {
+    container.innerHTML = `<div class="empty-state"><h3>No room details released yet</h3><p>Room ID and password will appear here after the admin releases them. Refresh is automatic every few seconds in live server mode.</p></div>`;
+    return;
+  }
+  container.innerHTML = publishedRooms.map((detail) => {
+    const room = getRoom(detail.roomId);
+    const complete = room ? slotsLeft(room) <= 0 : false;
+    const canShow = detail.forcePublish || complete;
+    return `
+      <article class="room-card ${canShow ? "open" : "few"}">
+        <div class="room-card-head"><span class="status-pill ${canShow ? "open" : "few"}">${canShow ? "Released" : "Waiting for full room"}</span><b>${escapeHtml(detail.roomId)}</b></div>
+        <h3>${escapeHtml(room?.title || detail.roomId)}</h3>
+        <p>${canShow ? "Use these details to join the custom room." : "Admin has prepared the room details. They will be visible once the room/lobby is complete or admin forces release."}</p>
+        ${canShow ? `<div class="note-box"><p><b>Room ID:</b> ${escapeHtml(detail.customRoomId)}</p><p><b>Password:</b> ${escapeHtml(detail.password)}</p><p>${escapeHtml(detail.message || "Join on time and do not share details outside registered players.")}</p></div>` : ""}
+        <div class="room-meta"><span>${room ? `${getConfirmedTeams(room)}/${room.capacity} ${entryLabel(room)} confirmed` : "Room status unavailable"}</span><span>Updated ${new Date(detail.updatedAt || Date.now()).toLocaleString("en-IN")}</span></div>
+      </article>
+    `;
+  }).join("");
+}
+
+function setupDashboardPage() {
+  const unlock = $("#dashboard-unlock");
+  const pin = $("#dashboard-pin");
+  const panel = $("#dashboard-panel");
+  if (!unlock || !panel) return;
+  unlock.addEventListener("click", async () => {
+    currentAdminPin = pin.value.trim();
+    try {
+      await renderDashboardData();
+      panel.classList.remove("hidden");
+      toast("Dashboard unlocked.");
+    } catch (error) {
+      toast("Wrong admin PIN or server unavailable.", true);
+    }
+  });
+}
+
+async function renderDashboardData() {
+  if (!SERVER_AVAILABLE) throw new Error("Live server unavailable");
+  const summary = await apiPost("/api/admin/summary", { pin: currentAdminPin });
+  renderAdminSummaryCards(summary);
+  const table = $("#dashboard-registrations");
+  if (table) {
+    const regs = summary.registrations || [];
+    table.innerHTML = regs.length ? `<div class="table-wrap"><table><thead><tr><th>Status</th><th>ID</th><th>Mode</th><th>Format</th><th>Room</th><th>Entry/Team</th><th>IGL/Player</th><th>Player details</th><th>WhatsApp</th><th>Fee</th><th>Payment</th></tr></thead><tbody>${regs.map((r) => `<tr><td>${registrationStatusBadge(r.status)}</td><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(r.formatLabel || r.variant || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.iglName || r.captainName)}</td><td>${playerListHtml(r)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatFee(r.fee)}</td><td>${escapeHtml(r.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><h3>No registrations yet</h3><p>Registrations will appear live here.</p></div>`;
+  }
+}
+
 function renderSchedulePage() {
   const container = $("#schedule-list");
   if (!container) return;
@@ -640,11 +784,26 @@ function setupAdminPage() {
   const panel = $("#admin-panel");
   if (!unlock || !panel) return;
 
-  unlock.addEventListener("click", () => {
-    if (pin.value.trim() !== DATA.event.adminPin) {
+  unlock.addEventListener("click", async () => {
+    const enteredPin = pin.value.trim();
+    if (SERVER_AVAILABLE) {
+      try {
+        await apiPost("/api/admin/summary", { pin: enteredPin });
+        currentAdminPin = enteredPin;
+        panel.classList.remove("hidden");
+        renderAdminPanel();
+        toast("Admin controls unlocked. Live server mode is active.");
+        return;
+      } catch (error) {
+        toast("Wrong admin PIN.", true);
+        return;
+      }
+    }
+    if (enteredPin !== DATA.event.adminPin) {
       toast("Wrong admin PIN.", true);
       return;
     }
+    currentAdminPin = enteredPin;
     panel.classList.remove("hidden");
     renderAdminPanel();
     toast("Admin controls unlocked on this device.");
@@ -653,32 +812,40 @@ function setupAdminPage() {
   setupAdminListeners();
 }
 
+
 function setupAdminListeners() {
-  $("#admin-mode")?.addEventListener("change", updateAdminRoomChoices);
+  $("#admin-mode")?.addEventListener("change", () => { const mode = $("#admin-mode")?.value || "br"; populateFeeSelect($("#admin-fee"), getFeeTiers(mode)[0], mode); updateAdminRoomChoices(); });
   $("#admin-fee")?.addEventListener("change", updateAdminRoomChoices);
   $("#admin-format")?.addEventListener("change", updateAdminRoomChoices);
   $("#admin-variant")?.addEventListener("change", updateAdminRoomChoices);
   $("#save-room-count")?.addEventListener("click", saveAdminRoomCount);
   $("#save-leaderboard")?.addEventListener("click", saveAdminLeaderboardEntry);
   $("#admin-lb-mode")?.addEventListener("change", updateLeaderboardFormMode);
+  $("#admin-lb-registration")?.addEventListener("change", (event) => applyApprovedRegistrationToLeaderboard(event.target.value));
   $("#export-registrations")?.addEventListener("click", exportRegistrationsCsv);
   $("#clear-registrations")?.addEventListener("click", clearRegistrations);
   $("#export-state")?.addEventListener("click", exportStateJson);
   $("#import-state")?.addEventListener("click", importStateJson);
   $("#reset-admin-state")?.addEventListener("click", resetAdminState);
+  $("#room-share-mode")?.addEventListener("change", updateRoomShareChoices);
+  $("#room-share-fee")?.addEventListener("change", updateRoomShareChoices);
+  $("#room-share-format")?.addEventListener("change", updateRoomShareChoices);
+  $("#room-share-variant")?.addEventListener("change", updateRoomShareChoices);
+  $("#save-room-details")?.addEventListener("click", saveRoomDetails);
 }
 
 function renderAdminPanel() {
-  populateFeeSelect($("#admin-fee"), DATA.economics.feeTiers[0]);
+  populateFeeSelect($("#admin-fee"), getFeeTiers("br")[0], "br");
   populateFormatSelect($("#admin-format"), "solo");
   updateAdminRoomChoices();
+  updateRoomShareChoices();
   updateLeaderboardFormMode();
   renderAdminTables();
 }
 
 function updateAdminRoomChoices() {
   const mode = $("#admin-mode")?.value || "br";
-  const fee = Number($("#admin-fee")?.value || DATA.economics.feeTiers[0]);
+  const fee = Number($("#admin-fee")?.value || getFeeTiers(mode)[0]);
   const variantWrap = $("#admin-variant-wrap");
   const formatWrap = $("#admin-format-wrap");
   const variant = $("#admin-variant")?.value || "Normal";
@@ -704,12 +871,20 @@ function updateAdminRoomChoices() {
 }
 
 
-function saveAdminRoomCount() {
+async function saveAdminRoomCount() {
   const roomId = $("#admin-room")?.value;
   const room = getRoom(roomId);
   if (!room) return toast("Select a room first.", true);
   const count = Number($("#admin-confirmed-count")?.value || 0);
   if (count < 0 || count > room.capacity) return toast(`Count must be between 0 and ${room.capacity}.`, true);
+  if (SERVER_AVAILABLE && currentAdminPin) {
+    await apiPost("/api/admin/room-count", { pin: currentAdminPin, roomId: room.id, count });
+    await refreshStateFromServer();
+    renderAdminTables();
+    renderPage();
+    toast("Room count updated live for everyone.");
+    return;
+  }
   const state = loadState();
   state.roomOverrides[room.id] = count;
   saveState(state);
@@ -726,11 +901,10 @@ function updateLeaderboardFormMode() {
   });
 }
 
-function saveAdminLeaderboardEntry() {
+async function saveAdminLeaderboardEntry() {
   const mode = $("#admin-lb-mode")?.value || "br";
   const teamName = clean($("#admin-lb-team")?.value);
   if (!teamName) return toast("Enter team name.", true);
-  const state = loadState();
   const common = {
     id: `LB-${Date.now()}`,
     teamName,
@@ -738,10 +912,11 @@ function saveAdminLeaderboardEntry() {
     roomId: clean($("#admin-lb-room")?.value),
     updatedAt: new Date().toISOString()
   };
+  let entry;
   if (mode === "br") {
     const format = $("#admin-lb-brformat")?.value || "squad";
     const formatInfo = battleFormatById(format);
-    state.leaderboard.br.push({
+    entry = {
       ...common,
       format,
       formatLabel: formatInfo?.label || format,
@@ -750,17 +925,30 @@ function saveAdminLeaderboardEntry() {
       placementPoints: Number($("#admin-lb-placement")?.value || 0),
       kills: Number($("#admin-lb-kills")?.value || 0),
       penalty: Number($("#admin-lb-penalty")?.value || 0)
-    });
+    };
   } else {
-    state.leaderboard.cs.push({
+    entry = {
       ...common,
       variant: $("#admin-lb-variant")?.value || "Normal",
       wins: Number($("#admin-lb-wins")?.value || 0),
       losses: Number($("#admin-lb-losses")?.value || 0),
       roundDiff: Number($("#admin-lb-rounddiff")?.value || 0),
       penalty: Number($("#admin-lb-penalty")?.value || 0)
-    });
+    };
   }
+
+  if (SERVER_AVAILABLE && currentAdminPin) {
+    await apiPost("/api/admin/leaderboard", { pin: currentAdminPin, mode, entry });
+    await refreshStateFromServer();
+    renderAdminTables();
+    renderLeaderboards("#admin-br-preview", "br");
+    renderLeaderboards("#admin-cs-preview", "cs");
+    toast("Leaderboard entry published live.");
+    return;
+  }
+
+  const state = loadState();
+  state.leaderboard[mode].push(entry);
   saveState(state);
   renderAdminTables();
   renderLeaderboards("#admin-br-preview", "br");
@@ -768,36 +956,203 @@ function saveAdminLeaderboardEntry() {
   toast("Leaderboard entry saved locally.");
 }
 
-function renderAdminTables() {
+
+function updateRoomShareChoices() {
+  populateFeeSelect($("#room-share-fee"), Number($("#room-share-fee")?.value || getFeeTiers("br")[0]), $("#room-share-mode")?.value || "br");
+  populateFormatSelect($("#room-share-format"), $("#room-share-format")?.value || "solo");
+  const mode = $("#room-share-mode")?.value || "br";
+  const fee = Number($("#room-share-fee")?.value || getFeeTiers(mode)[0]);
+  const formatWrap = $("#room-share-format-wrap");
+  const variantWrap = $("#room-share-variant-wrap");
+  const format = $("#room-share-format")?.value || "solo";
+  const variant = $("#room-share-variant")?.value || "Normal";
+  formatWrap?.classList.toggle("hidden", mode !== "br");
+  variantWrap?.classList.toggle("hidden", mode !== "cs");
+  const rooms = getRooms({ mode, fee, format: mode === "br" ? format : undefined, variant: mode === "cs" ? variant : undefined });
+  const select = $("#room-share-room");
+  if (!select) return;
+  select.innerHTML = rooms.map((room) => `<option value="${room.id}">${room.title} (${getConfirmedTeams(room)}/${room.capacity} ${entryLabel(room)})</option>`).join("");
+}
+
+async function saveRoomDetails() {
+  const roomId = $("#room-share-room")?.value;
+  const customRoomId = clean($("#custom-room-id")?.value);
+  const password = clean($("#custom-room-password")?.value);
+  const message = clean($("#custom-room-message")?.value);
+  const forcePublish = Boolean($("#room-force-publish")?.checked);
+  const published = Boolean($("#room-published")?.checked);
+  if (!roomId || !customRoomId || !password) return toast("Select room and enter room ID plus password.", true);
+  const detail = { roomId, customRoomId, password, message, forcePublish, published, updatedAt: new Date().toISOString() };
+  if (SERVER_AVAILABLE && currentAdminPin) {
+    await apiPost("/api/admin/room-details", { pin: currentAdminPin, detail });
+    await refreshStateFromServer();
+    toast("Room ID/password published live according to your release settings.");
+    return;
+  }
   const state = loadState();
+  state.roomDetails[roomId] = detail;
+  saveState(state);
+  toast("Room details saved locally.");
+}
+
+async function renderAdminTables() {
+  let state = loadState();
+  let summaryForCards = null;
+  if (SERVER_AVAILABLE && currentAdminPin) {
+    try {
+      const summary = await apiPost("/api/admin/summary", { pin: currentAdminPin });
+      summaryForCards = summary;
+      state = normalizeState({ ...loadState(), registrations: summary.registrations || [] });
+      ADMIN_REGISTRATIONS = summary.registrations || [];
+      renderAdminSummaryCards(summary);
+    } catch (error) {
+      toast(error.message || "Could not load admin summary.", true);
+    }
+  } else {
+    ADMIN_REGISTRATIONS = state.registrations || [];
+    summaryForCards = {
+      totalEntries: ADMIN_REGISTRATIONS.length,
+      pendingEntries: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "Pending").toLowerCase() === "pending").length,
+      approvedEntries: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").length,
+      approvedPlayers: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").reduce((sum, r) => sum + Number(r.playersPerEntry || r.players?.length || 0), 0),
+      approvedReportedPaidAmount: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved" && r.paymentRef).reduce((sum, r) => sum + Number(r.fee || 0), 0),
+      approvedExpectedAmount: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").reduce((sum, r) => sum + Number(r.fee || 0), 0)
+    };
+    renderAdminSummaryCards(summaryForCards);
+  }
+
+  updateApprovedTeamSelect();
+
   const regs = $("#admin-registrations");
   if (regs) {
     if (!state.registrations.length) {
-      regs.innerHTML = `<div class="empty-state"><h3>No local registrations yet</h3><p>Registrations submitted in this browser will appear here.</p></div>`;
+      regs.innerHTML = `<div class="empty-state"><h3>No registrations yet</h3><p>Live registrations will appear here after players submit forms.</p></div>`;
     } else {
-      regs.innerHTML = `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Mode</th><th>Format/Type</th><th>Room</th><th>Team/Entry</th><th>Captain</th><th>Phone</th><th>Fee</th><th>Time</th></tr></thead><tbody>${state.registrations.map((r) => `<tr><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(r.formatLabel || r.variant || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.captainName)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatFee(r.fee)}</td><td>${escapeHtml(r.submittedAtDisplay)}</td></tr>`).join("")}</tbody></table></div>`;
+      regs.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Status</th><th>Actions</th><th>ID</th><th>Mode</th><th>Format/Type</th><th>Room</th><th>Team/Entry</th><th>IGL/Player</th><th>Players</th><th>WhatsApp</th><th>Fee</th><th>Payment Ref</th><th>Time</th></tr></thead><tbody>${state.registrations.map((r) => `
+        <tr>
+          <td>${registrationStatusBadge(r.status)}</td>
+          <td class="admin-row-actions">
+            <button class="btn small" type="button" data-reg-action="Approved" data-reg-id="${escapeHtml(r.id)}">Approve</button>
+            <button class="btn small ghost danger" type="button" data-reg-action="Rejected" data-reg-id="${escapeHtml(r.id)}">Reject</button>
+          </td>
+          <td>${escapeHtml(r.id)}</td>
+          <td>${escapeHtml(r.modeLabel)}</td>
+          <td>${escapeHtml(r.formatLabel || r.variant || "-")}</td>
+          <td>${escapeHtml(r.roomId)}</td>
+          <td>${escapeHtml(r.teamName)}</td>
+          <td>${escapeHtml(r.iglName || r.captainName)}<br><small>${escapeHtml(r.iglUid || r.players?.[0]?.uid || "")}</small></td>
+          <td>${playerListHtml(r)}</td>
+          <td>${escapeHtml(r.whatsapp)}</td>
+          <td>${formatFee(r.fee)}</td>
+          <td>${escapeHtml(r.paymentRef || "-")}</td>
+          <td>${escapeHtml(r.submittedAtDisplay || "-")}</td>
+        </tr>`).join("")}</tbody></table></div>`;
+      $$('[data-reg-action]', regs).forEach((button) => {
+        button.addEventListener("click", () => updateRegistrationStatus(button.dataset.regId, button.dataset.regAction));
+      });
     }
   }
   renderLeaderboards("#admin-br-preview", "br");
   renderLeaderboards("#admin-cs-preview", "cs");
 }
 
-function exportRegistrationsCsv() {
+function updateApprovedTeamSelect() {
+  const select = $("#admin-lb-registration");
+  if (!select) return;
+  const approved = ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved");
+  select.innerHTML = `<option value="">Select approved team/player</option>` + approved.map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.teamName)} — ${escapeHtml(r.formatLabel || r.variant || r.modeLabel)} — ${escapeHtml(r.roomId)}</option>`).join("");
+}
+
+async function updateRegistrationStatus(registrationId, status) {
+  if (!registrationId) return;
+  if (SERVER_AVAILABLE && currentAdminPin) {
+    await apiPost("/api/admin/registration-status", { pin: currentAdminPin, registrationId, status });
+    await refreshStateFromServer();
+    await renderAdminTables();
+    renderPage();
+    toast(`Registration marked ${status}. Public slots updated live.`);
+    return;
+  }
   const state = loadState();
-  if (!state.registrations.length) return toast("No local registrations to export.", true);
-  const headers = ["id", "mode", "formatOrType", "playersPerEntry", "roomId", "fee", "feeRule", "teamName", "captainName", "whatsapp", "institution", "rollNumber", "email", "paymentRef", "submittedAt", "p1Ign", "p1Uid", "p2Ign", "p2Uid", "p3Ign", "p3Uid", "p4Ign", "p4Uid"];
+  const reg = state.registrations.find((r) => r.id === registrationId);
+  if (reg) reg.status = status;
+  saveState(state);
+  await renderAdminTables();
+  renderPage();
+  toast(`Registration marked ${status} locally.`);
+}
+
+function applyApprovedRegistrationToLeaderboard(registrationId) {
+  const reg = ADMIN_REGISTRATIONS.find((r) => r.id === registrationId);
+  if (!reg) return;
+  const mode = reg.mode || (reg.modeLabel === "Battle Royale" ? "br" : "cs");
+  const modeSelect = $("#admin-lb-mode");
+  if (modeSelect) modeSelect.value = mode;
+  updateLeaderboardFormMode();
+  if ($("#admin-lb-team")) $("#admin-lb-team").value = reg.teamName || "";
+  if ($("#admin-lb-fee")) $("#admin-lb-fee").value = reg.fee || 0;
+  if ($("#admin-lb-room")) $("#admin-lb-room").value = reg.roomId || "";
+  if (mode === "br" && $("#admin-lb-brformat")) $("#admin-lb-brformat").value = reg.format || "squad";
+  if (mode === "cs" && $("#admin-lb-variant")) $("#admin-lb-variant").value = reg.variant || "Normal";
+  toast("Approved registration loaded into leaderboard form. Now enter score/kills/wins and save.");
+}
+
+
+function renderAdminSummaryCards(summary) {
+  const box = $("#admin-live-summary");
+  if (!box || !summary) return;
+  box.innerHTML = `
+    <article><strong>${summary.totalEntries || 0}</strong><span>Total registrations</span></article>
+    <article><strong>${summary.pendingEntries || 0}</strong><span>Pending approval</span></article>
+    <article><strong>${summary.approvedEntries || 0}</strong><span>Approved entries/teams</span></article>
+    <article><strong>${summary.approvedPlayers || 0}</strong><span>Approved players</span></article>
+    <article><strong>${formatFee(summary.approvedReportedPaidAmount || 0)}</strong><span>Reported paid by approved entries</span></article>
+    <article><strong>${formatFee(summary.approvedExpectedAmount || 0)}</strong><span>Expected from approved entries</span></article>
+  `;
+}
+
+function registrationStatusBadge(status) {
+  const value = String(status || "Pending");
+  const key = value.toLowerCase();
+  const cls = key === "approved" ? "open" : key === "rejected" ? "closed" : "few";
+  return `<span class="status-pill ${cls}">${escapeHtml(value)}</span>`;
+}
+
+function playerListHtml(reg) {
+  const players = Array.isArray(reg.players) ? reg.players : [];
+  if (!players.length) return "-";
+  return players.map((player, index) => `${index + 1}. ${escapeHtml(player.ign || "-")} / ${escapeHtml(player.uid || "-")}`).join("<br>");
+}
+
+
+async function exportRegistrationsCsv() {
+  let state = loadState();
+  if (SERVER_AVAILABLE && currentAdminPin) {
+    const summary = await apiPost("/api/admin/summary", { pin: currentAdminPin });
+    state = normalizeState({ ...state, registrations: summary.registrations || [] });
+  }
+  if (!state.registrations.length) return toast("No registrations to export.", true);
+  const headers = ["id", "mode", "formatOrType", "playersPerEntry", "roomId", "fee", "feeRule", "teamName", "iglName", "iglUid", "whatsapp", "paymentRef", "submittedAt", "p1Name", "p1Uid", "p2Name", "p2Uid", "p3Name", "p3Uid", "p4Name", "p4Uid"];
   const rows = state.registrations.map((r) => {
     const flat = {
-      id: r.id, mode: r.modeLabel, formatOrType: r.formatLabel || r.variant || "", playersPerEntry: r.playersPerEntry || "", roomId: r.roomId, fee: r.fee, feeRule: r.feeRule || "", teamName: r.teamName, captainName: r.captainName, whatsapp: r.whatsapp, institution: r.institution, rollNumber: r.rollNumber, email: r.email, paymentRef: r.paymentRef, submittedAt: r.submittedAt,
-      p1Ign: r.players?.[0]?.ign, p1Uid: r.players?.[0]?.uid, p2Ign: r.players?.[1]?.ign, p2Uid: r.players?.[1]?.uid, p3Ign: r.players?.[2]?.ign, p3Uid: r.players?.[2]?.uid, p4Ign: r.players?.[3]?.ign, p4Uid: r.players?.[3]?.uid
+      id: r.id, mode: r.modeLabel, formatOrType: r.formatLabel || r.variant || "", playersPerEntry: r.playersPerEntry || "", roomId: r.roomId, fee: r.fee, feeRule: r.feeRule || "", teamName: r.teamName, iglName: r.iglName || r.captainName, iglUid: r.iglUid || r.players?.[0]?.uid, whatsapp: r.whatsapp, paymentRef: r.paymentRef, submittedAt: r.submittedAt,
+      p1Name: r.players?.[0]?.ign, p1Uid: r.players?.[0]?.uid, p2Name: r.players?.[1]?.ign, p2Uid: r.players?.[1]?.uid, p3Name: r.players?.[2]?.ign, p3Uid: r.players?.[2]?.uid, p4Name: r.players?.[3]?.ign, p4Uid: r.players?.[3]?.uid
     };
     return headers.map((h) => csvEscape(flat[h])).join(",");
   });
   downloadFile(`nith-free-fire-registrations-${new Date().toISOString().slice(0, 10)}.csv`, [headers.join(","), ...rows].join("\n"), "text/csv");
 }
 
-function clearRegistrations() {
-  if (!confirm("Clear local registrations on this device?")) return;
+async function clearRegistrations() {
+  if (!confirm("Clear registrations? This cannot be undone.")) return;
+  if (SERVER_AVAILABLE && currentAdminPin) {
+    await apiPost("/api/admin/clear-registrations", { pin: currentAdminPin });
+    await refreshStateFromServer();
+    renderAdminTables();
+    renderPage();
+    toast("Live registrations cleared.");
+    return;
+  }
   const state = loadState();
   state.registrations = [];
   saveState(state);
@@ -806,10 +1161,13 @@ function clearRegistrations() {
   toast("Local registrations cleared.");
 }
 
+
 function exportStateJson() {
   const state = loadState();
   const exportable = {
     roomOverrides: state.roomOverrides,
+    registrationCounts: state.registrationCounts,
+    roomDetails: state.roomDetails,
     leaderboard: state.leaderboard,
     notices: state.notices,
     exportedAt: new Date().toISOString()
@@ -827,6 +1185,8 @@ function importStateJson() {
     const incoming = JSON.parse(box.value);
     const state = loadState();
     state.roomOverrides = incoming.roomOverrides || state.roomOverrides;
+    state.registrationCounts = incoming.registrationCounts || state.registrationCounts;
+    state.roomDetails = incoming.roomDetails || state.roomDetails;
     state.leaderboard = incoming.leaderboard || state.leaderboard;
     state.notices = incoming.notices || state.notices;
     saveState(state);

@@ -1,5 +1,6 @@
 (function () {
-  const feeTiers = [20, 40, 60, 80, 100];
+  const brFeeTiers = [20, 40, 60, 80, 100];
+  const csFeeTiers = [50, 70, 90, 100];
   const roomsPerTier = 5;
   const battleFormats = [
     { id: "solo", label: "Solo", playersPerEntry: 1, capacity: 48, description: "For players who want to play alone. 48 solo entries per lobby." },
@@ -9,7 +10,7 @@
   ];
   const rooms = [];
 
-  feeTiers.forEach((fee) => {
+  brFeeTiers.forEach((fee) => {
     for (let i = 1; i <= roomsPerTier; i += 1) {
       battleFormats.forEach((format) => {
         rooms.push({
@@ -27,7 +28,11 @@
           status: "open"
         });
       });
+    }
+  });
 
+  csFeeTiers.forEach((fee) => {
+    for (let i = 1; i <= roomsPerTier; i += 1) {
       ["Normal", "One Tap"].forEach((variant) => {
         const shortVariant = variant === "One Tap" ? "OT" : "NM";
         rooms.push({
@@ -58,17 +63,19 @@
       supportChannel: "Official WhatsApp group/contact to be added",
       whatsappNumber: "",
       upiId: "yourupi@bank",
-      adminPin: "2025",
+      adminPin: "2026",
       disclaimer: "This is a student-organized tournament portal for a Free Fire event around NIT Hamirpur. It is not affiliated with, endorsed by, or sponsored by Garena or Free Fire. Use institute-official wording only after proper permission."
     },
     economics: {
-      feeTiers,
+      feeTiers: brFeeTiers,
+      brFeeTiers,
+      csFeeTiers,
       roomsPerTier,
       payoutType: "entry-based",
-      feeRule: "Solo fee is per player. Duo, Trio and Squad fee is per team. Prize is entry-based and may vary with confirmed entries and organizer announcement.",
+      feeRule: "Battle Royale Solo fee is per player. Battle Royale Duo, Trio, Squad and Clash Squad fee is per team. Prize is entry-based and may vary with confirmed entries and organizer announcement.",
       starterPrizeNote: "The ₹20 Battle Royale full-lobby target reward pool starts from ₹200. Final prize may vary according to format, confirmed teams, payments, and organizer announcement.",
       brFullLobbyPrizeByTier: { 20: 200, 40: 400, 60: 600, 80: 800, 100: 1000 },
-      csPrizeNote: "Clash Squad winner reward is entry-based and announced per room after both teams are confirmed. Admin may top up or reduce according to confirmed payments."
+      csPrizeNote: "Clash Squad starts from ₹50 entry. Winner reward is entry-based and announced per room after both teams are confirmed. Admin may top up or reduce according to confirmed payments."
     },
     battleFormats,
     scoring: {
@@ -89,33 +96,21 @@
     schedule: [
       { time: "TBA", title: "Registration opens", detail: "Players choose fee tier, room, and mode/format." },
       { time: "TBA", title: "Admin verification", detail: "Organizer confirms payment and slot availability." },
-      { time: "15 minutes before match", title: "Room ID shared privately", detail: "Room ID/password are shared only through the official communication channel." },
+      { time: "15 minutes before match", title: "Room ID shared privately", detail: "Room ID/password are shared only through the official Room Details page after admin release." },
       { time: "Match time", title: "Battle Royale / Clash Squad", detail: "Battle Royale has 3 matches per lobby. Clash Squad has 1 match per room." },
       { time: "After verification", title: "Leaderboard and payout", detail: "Scores are updated after screenshots/recordings and fair-play checks." }
     ],
     publishedState: {
-      {
-  "roomOverrides": {},
-  "leaderboard": {
-    "br": [
-      {
-        "id": "LB-1791291811858",
-        "teamName": "Team",
-        "fee": 20,
-        "roomId": "778382892",
-        "updatedAt": "2026-10-06T13:03:31.858Z",
-        "format": "solo",
-        "formatLabel": "Solo",
-        "matchesPlayed": 3,
-        "booyah": 1,
-        "placementPoints": 25,
-        "kills": 25,
-        "penalty": 0
-      }
-    ],
-    "cs": []
-  },
-  "notices": [],
-  "exportedAt": "2026-10-06T13:04:31.926Z"
-};
+      roomOverrides: {},
+      registrationCounts: {},
+      roomDetails: {},
+      leaderboard: { br: [], cs: [] },
+      notices: [
+        "Slots shown are admin-confirmed or registered on the live server. Final slot is valid only after organizer confirmation.",
+        "Solo, Duo, Trio and Squad Battle Royale sections are available for players with or without a full team.",
+        "Clash Squad entry starts directly from ₹50.",
+        "Room ID/password will appear on the Room Details page only after admin release."
+      ]
+    }
+  };
 })();
