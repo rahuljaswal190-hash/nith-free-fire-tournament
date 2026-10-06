@@ -485,3 +485,14 @@ td { color: #d7deec; }
 @media (max-width: 760px) {
   .format-grid { grid-template-columns: 1fr; }
 }
+.muted-link {
+  opacity: .65;
+  cursor: default;
+}
+.admin-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 170px;
+}
+td small { color: var(--muted); }

@@ -20,6 +20,7 @@
     <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
     <a href="rules.html" data-nav="rules">Rules</a>
     <a href="leaderboard.html" data-nav="leaderboard">Leaderboard</a>
+    <a href="room-details.html" data-nav="rooms">Room Details</a>
     <a href="schedule-results.html" data-nav="schedule">Schedule</a>
     <a href="admin.html" data-nav="admin">Admin</a>
   </nav>
@@ -54,14 +55,12 @@
       </div>
       <form class="form-card" data-registration-form data-mode="cs">
   <h2>Clash Squad Registration</h2>
-  <p>Entry starts from ₹20 per team. No city/area field is required. Final slot is confirmed only by the organizer.</p>
+  <p>Clash Squad entry starts directly from ₹50 per team. Final slot is confirmed only by the organizer.</p>
   <div class="field-grid">
     <label>Team Name<input required name="teamName" placeholder="Example: NITH Warriors" /></label>
-    <label>Captain Name<input required name="captainName" placeholder="Full name" /></label>
-    <label>Captain WhatsApp<input required name="whatsapp" inputmode="tel" placeholder="10-digit mobile number" /></label>
-    <label>Institution / College<input name="institution" placeholder="NIT Hamirpur / other" /></label>
-    <label>NIT Roll No. / Student ID<input name="rollNumber" placeholder="If applicable" /></label>
-    <label>Email<input name="email" type="email" placeholder="Optional" /></label>
+    <label>IGL Name<input required name="iglName" placeholder="In-game leader name" /></label>
+    <label>IGL Free Fire ID<input required name="iglUid" inputmode="numeric" placeholder="Numeric Free Fire ID" /></label>
+    <label>WhatsApp Number<input required name="whatsapp" inputmode="tel" placeholder="10-digit mobile number" /></label>
     <label>Match Type
   <select name="variant" id="cs-form-variant">
     <option value="Normal">Normal Clash Squad</option>
@@ -73,27 +72,20 @@
 </label>
   </div>
   <div class="player-section">
-    <h3>Four Player Roster</h3>
-    <div class="player-row">
-  <label>Player 1 IGN<input required name="p1Ign" placeholder="In-game name" /></label>
-  <label>Player 1 UID<input required name="p1Uid" inputmode="numeric" placeholder="Numeric Free Fire UID" /></label>
-  <label>Roll No. / ID<input name="p1Roll" placeholder="Optional" /></label>
-</div>
-<div class="player-row">
-  <label>Player 2 IGN<input required name="p2Ign" placeholder="In-game name" /></label>
-  <label>Player 2 UID<input required name="p2Uid" inputmode="numeric" placeholder="Numeric Free Fire UID" /></label>
-  <label>Roll No. / ID<input name="p2Roll" placeholder="Optional" /></label>
-</div>
-<div class="player-row">
-  <label>Player 3 IGN<input required name="p3Ign" placeholder="In-game name" /></label>
-  <label>Player 3 UID<input required name="p3Uid" inputmode="numeric" placeholder="Numeric Free Fire UID" /></label>
-  <label>Roll No. / ID<input name="p3Roll" placeholder="Optional" /></label>
-</div>
-<div class="player-row">
-  <label>Player 4 IGN<input required name="p4Ign" placeholder="In-game name" /></label>
-  <label>Player 4 UID<input required name="p4Uid" inputmode="numeric" placeholder="Numeric Free Fire UID" /></label>
-  <label>Roll No. / ID<input name="p4Roll" placeholder="Optional" /></label>
-</div>
+    <h3>Team Members</h3>
+    <p class="disclaimer">IGL is counted as Player 1. Add the other three teammates below.</p>
+    <div class="player-row" data-player-row="2">
+      <label>Player 2 Name<input required name="p2Name" placeholder="In-game name" /></label>
+      <label>Player 2 Free Fire ID<input required name="p2Uid" inputmode="numeric" placeholder="Numeric Free Fire ID" /></label>
+    </div>
+    <div class="player-row" data-player-row="3">
+      <label>Player 3 Name<input required name="p3Name" placeholder="In-game name" /></label>
+      <label>Player 3 Free Fire ID<input required name="p3Uid" inputmode="numeric" placeholder="Numeric Free Fire ID" /></label>
+    </div>
+    <div class="player-row" data-player-row="4">
+      <label>Player 4 Name<input required name="p4Name" placeholder="In-game name" /></label>
+      <label>Player 4 Free Fire ID<input required name="p4Uid" inputmode="numeric" placeholder="Numeric Free Fire ID" /></label>
+    </div>
   </div>
   <label>Payment UTR / Reference<input required name="paymentRef" placeholder="Enter UTR or write Pay after confirmation" /></label>
   <label class="checkbox-line"><input type="checkbox" name="acceptedRules" required /> I confirm my team has read the rules, fair-play policy, payment/prize variation note, and room confirmation process.</label>
@@ -126,5 +118,5 @@
 </footer>
 <script src="data.js"></script>
 <script src="site.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a45e057bc836d220',t:'MTc5MTIyMDAzMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
