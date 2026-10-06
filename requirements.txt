@@ -1,1 +1,2 @@
-# No external Python packages required.
+# No external Python packages are required.
+# The tournament website server uses only Python standard library modules.

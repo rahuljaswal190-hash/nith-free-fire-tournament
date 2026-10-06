@@ -20,6 +20,7 @@
     <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
     <a href="rules.html" data-nav="rules">Rules</a>
     <a href="leaderboard.html" data-nav="leaderboard">Leaderboard</a>
+    <a href="room-details.html" data-nav="rooms">Room Details</a>
     <a href="schedule-results.html" data-nav="schedule">Schedule</a>
     <a href="admin.html" data-nav="admin">Admin</a>
   </nav>
@@ -31,7 +32,8 @@
     <div class="reveal">
       <span class="eyebrow">Admin controls</span>
       <h1 class="page-title">Control slots and <span>leaderboard updates</span>.</h1>
-      <p class="page-lead">This is a static-site admin helper. It controls data in this browser and helps you export data. For all players to see updates globally, publish the exported state into <code>data.js</code> on GitHub or connect a real backend later.</p>
+      <p class="page-lead">Use this panel to publish leaderboard scores, room ID/password, and slot counts. In live server mode, your changes appear for everyone immediately. On static hosting, you still need a backend for true live updates.</p>
+      <div class="action-row"><a class="btn small ghost" href="admin-dashboard.html">Open Live Dashboard</a><a class="btn small ghost" href="room-details.html">View Room Details Page</a></div>
     </div>
   </section>
 
@@ -47,6 +49,7 @@
   </section>
 
   <section class="section hidden" id="admin-panel">
+    <div class="stats-grid" id="admin-live-summary"></div>
     <div class="admin-grid">
       <article class="admin-box">
         <h2>Update room slots</h2>
@@ -63,12 +66,32 @@
       </article>
 
       <article class="admin-box">
-        <h2>Add leaderboard score</h2>
+        <h2>Publish Room ID & Password</h2>
+        <p>Share room details from here. If “release only when complete” is used, players will see details only after the room/lobby is full.</p>
         <div class="field-grid">
+          <label>Mode<select id="room-share-mode"><option value="br">Battle Royale</option><option value="cs">Clash Squad</option></select></label>
+          <label>Fee<select id="room-share-fee"></select></label>
+          <label id="room-share-format-wrap">Battle Royale Format<select id="room-share-format"></select></label>
+          <label id="room-share-variant-wrap" class="hidden">Type<select id="room-share-variant"><option value="Normal">Normal</option><option value="One Tap">One Tap</option></select></label>
+          <label>Website Room<select id="room-share-room"></select></label>
+          <label>Custom Room ID<input id="custom-room-id" placeholder="Enter Free Fire room ID" /></label>
+          <label>Room Password<input id="custom-room-password" placeholder="Enter password" /></label>
+        </div>
+        <label>Message<textarea id="custom-room-message" placeholder="Example: Join 10 minutes before start. Do not share room details outside registered players."></textarea></label>
+        <label class="checkbox-line"><input type="checkbox" id="room-published" checked /> Publish on Room Details page</label>
+        <label class="checkbox-line"><input type="checkbox" id="room-force-publish" /> Force release now even if room/lobby is not full</label>
+        <div class="admin-actions"><button class="btn small" id="save-room-details" type="button">Publish Room Details</button></div>
+      </article>
+
+      <article class="admin-box">
+        <h2>Add leaderboard score</h2>
+        <p>Select an approved registration first so you do not need to type team name, room, fee, or format manually. Then enter only the match score details.</p>
+        <div class="field-grid">
+          <label data-lb-field="both">Approved registration<select id="admin-lb-registration"><option value="">Approve a registration first</option></select></label>
           <label data-lb-field="both">Mode<select id="admin-lb-mode"><option value="br">Battle Royale</option><option value="cs">Clash Squad</option></select></label>
           <label data-lb-field="both">Team<input id="admin-lb-team" placeholder="Team name" /></label>
           <label data-lb-field="both">Fee<input id="admin-lb-fee" type="number" value="20" /></label>
-          <label data-lb-field="both">Room ID<input id="admin-lb-room" placeholder="BR-SOLO-20-1 / CS-NM-20-1" /></label>
+          <label data-lb-field="both">Room ID<input id="admin-lb-room" placeholder="BR-SOLO-20-1 / CS-NM-50-1" /></label>
           <label data-lb-field="br">Battle Royale Format<select id="admin-lb-brformat"><option value="solo">Solo</option><option value="duo">Duo</option><option value="trio">Trio</option><option value="squad">Squad</option></select></label>
           <label data-lb-field="br">Matches Played<input id="admin-lb-matches" type="number" value="3" /></label>
           <label data-lb-field="br">Booyah Count<input id="admin-lb-booyah" type="number" value="0" /></label>
@@ -84,10 +107,10 @@
       </article>
 
       <article class="admin-box full">
-        <h2>Local registrations</h2>
+        <h2>Registrations & approvals</h2>
         <div class="admin-actions">
           <button class="btn small" id="export-registrations" type="button">Export Registrations CSV</button>
-          <button class="btn small ghost danger" id="clear-registrations" type="button">Clear Local Registrations</button>
+          <button class="btn small ghost danger" id="clear-registrations" type="button">Clear Registrations</button>
         </div>
         <div id="admin-registrations"></div>
       </article>
@@ -114,7 +137,7 @@
         <ol class="help-list">
           <li><b>Change tournament text:</b> edit <code>data.js</code> for event name, WhatsApp, UPI, date, fee tiers and prize notes.</li>
           <li><b>Update slots:</b> unlock this page, set confirmed entries/teams for each room, then export state JSON.</li>
-          <li><b>Update leaderboard:</b> add score entries here, verify preview, then export state JSON.</li>
+          <li><b>Update leaderboard:</b> add score entries here. In live server mode it appears immediately on the public leaderboard.</li><li><b>Publish room ID/password:</b> use the Room ID & Password box. Players can view it on <code>room-details.html</code> after release.</li>
           <li><b>Make updates visible to everyone:</b> open GitHub on your phone, edit <code>data.js</code>, paste the exported values into <code>publishedState</code>, and commit. GitHub Pages updates in 1–3 minutes.</li>
           <li><b>Collect real registrations centrally:</b> connect Google Sheets/Firebase/Supabase later. Static GitHub Pages alone cannot collect every player’s entry in one admin account automatically.</li>
         </ol>

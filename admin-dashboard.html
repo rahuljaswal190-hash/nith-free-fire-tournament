@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Leaderboard | NIT Hamirpur Free Fire Tournament</title>
-  <meta name="description" content="Track Battle Royale and Clash Squad leaderboard standings." />
+  <title>Admin Live Dashboard | NIT Hamirpur Free Fire Tournament</title>
+  <meta name="description" content="Admin-only live dashboard for registrations, players and payments." />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body data-page="leaderboard" id="top">
+<body data-page="dashboard" id="top">
 <header class="site-header">
   <a class="brand" href="index.html" aria-label="NIT Hamirpur Free Fire Tournament home">
     <span class="brand-mark">NITH</span>
@@ -30,29 +30,31 @@
 <main>
   <section class="hero compact">
     <div class="reveal">
-      <span class="eyebrow">Leaderboard</span>
-      <h1 class="page-title">Track teams and <span>verified scores</span>.</h1>
-      <p class="page-lead">Battle Royale ranks Solo, Duo, Trio and Squad entries by placement points plus kills across three matches. Clash Squad ranks by match win points and round difference. Results appear after admin verification.</p>
+      <span class="eyebrow">Admin dashboard</span>
+      <h1 class="page-title">Live registrations, players and <span>payment totals</span>.</h1>
+      <p class="page-lead">Unlock with admin PIN to see how many entries/teams and players have registered, plus the reported paid amount from registration references.</p>
     </div>
   </section>
 
   <section class="section">
-    <div class="scoring-grid">
-      <article class="rule-card"><h3>Battle Royale scoring</h3><p>3 matches per lobby. Total = placement points + kills - penalties. Top 3 entries/teams are selected for Solo, Duo, Trio and Squad sections.</p><p>Placement table: 1st 12, 2nd 9, 3rd 8, 4th 7, 5th 6, 6th 5, 7th 4, 8th 3, 9th 2, 10th 1, 11th-12th 0.</p></article>
-      <article class="rule-card"><h3>Clash Squad scoring</h3><p>1 match per room. Win = 3 points, loss = 0. Tiebreakers: round difference, then admin decision/proof.</p><p>Normal and One Tap leaderboards use the same ranking logic unless admins announce a special rule.</p></article>
+    <div class="admin-box">
+      <h2>Unlock dashboard</h2>
+      <div class="filters">
+        <label>Admin PIN<input id="dashboard-pin" type="password" inputmode="numeric" placeholder="Enter PIN" /></label>
+        <button class="btn" id="dashboard-unlock" type="button">Unlock Dashboard</button>
+      </div>
     </div>
   </section>
 
-  <section class="section">
-    <div class="section-head"><span class="eyebrow">Battle Royale</span><h2>Battle Royale standings</h2></div>
-    <div id="br-leaderboard"></div>
-  </section>
-
-  <section class="section">
-    <div class="section-head"><span class="eyebrow">Clash Squad</span><h2>Clash Squad standings</h2></div>
-    <div id="cs-leaderboard"></div>
+  <section class="section hidden" id="dashboard-panel">
+    <div class="stats-grid" id="admin-live-summary"></div>
+    <div class="admin-box full">
+      <h2>Registered entries</h2>
+      <div id="dashboard-registrations"></div>
+    </div>
   </section>
 </main>
+
 <footer class="footer">
   <div>
     <strong data-event="name">NIT Hamirpur Free Fire Tournament</strong>
