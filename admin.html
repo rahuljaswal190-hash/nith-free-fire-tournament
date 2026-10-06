@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Static admin panel for slots, leaderboard, registrations and export/import state." />
-  <link rel="stylesheet" href="styles.css?v=20261006-final-dropdown-fix3" />
+  <link rel="stylesheet" href="styles.css?v=20261006-final-v6" />
 </head>
 <body data-page="admin" id="top">
 <header class="site-header">
@@ -20,6 +20,7 @@
     <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
     <a href="rules.html" data-nav="rules">Rules</a>
     <a href="leaderboard.html" data-nav="leaderboard">Leaderboard</a>
+    <a href="status-check.html" data-nav="status">Check Status</a>
     <a href="room-details.html" data-nav="rooms">Room Details</a>
     <a href="schedule-results.html" data-nav="schedule">Schedule</a>
     <a href="admin.html" data-nav="admin">Admin</a>
@@ -32,7 +33,7 @@
     <div class="reveal">
       <span class="eyebrow">Admin controls</span>
       <h1 class="page-title">Control slots and <span>leaderboard updates</span>.</h1>
-      <p class="page-lead">Use this panel to publish leaderboard scores, room ID/password, and slot counts. In live server mode, your changes appear for everyone immediately. On static hosting, you still need a backend for true live updates.</p>
+      <p class="page-lead">Use this panel to approve teams, assign lobbies, enter final team scores, and publish room ID/password. In live server mode, your changes appear for everyone immediately. On static hosting, you still need a backend for true live updates.</p>
       <div class="action-row"><a class="btn small ghost" href="admin-dashboard.html">Open Live Dashboard</a><a class="btn small ghost" href="room-details.html">View Room Details Page</a></div>
     </div>
   </section>
@@ -40,7 +41,7 @@
   <section class="section">
     <div class="admin-box">
       <h2>Unlock admin panel</h2>
-      <p>Default PIN is <code>2026</code>. Change it in <code>data.js</code> before launch. This is not secure like a real backend login; it is only a static-site convenience.</p>
+      <p>Enter the admin PIN set in Render under <code>TOURNAMENT_ADMIN_PIN</code>. If you did not set that environment variable, the fallback PIN is <code>2026</code>. Keep this PIN private.</p>
       <div class="filters">
         <label>Admin PIN<input id="admin-pin" type="password" inputmode="numeric" placeholder="Enter PIN" /></label>
         <button class="btn" id="admin-unlock" type="button">Unlock</button>
@@ -53,7 +54,7 @@
     <div class="admin-grid">
       <article class="admin-box">
         <h2>Update room slots</h2>
-        <p>Set confirmed/filled entries for any room. Battle Royale capacities depend on format: Solo 48, Duo 24, Trio 16, Squad 12. Clash Squad capacity is 2 teams.</p>
+        <p>Set confirmed/filled entries for any room. Battle Royale lobbies have up to 12 entries/teams (slots 1–12). Clash Squad rooms have 2 teams.</p>
         <div class="field-grid">
           <label>Mode<select id="admin-mode"><option value="br">Battle Royale</option><option value="cs">Clash Squad</option></select></label>
           <label>Fee<select id="admin-fee"></select></label>
@@ -83,28 +84,7 @@
         <div class="admin-actions"><button class="btn small" id="save-room-details" type="button">Publish Room Details</button></div>
       </article>
 
-      <article class="admin-box">
-        <h2>Add leaderboard score</h2>
-        <p>Select an approved registration first so you do not need to type team name, room, fee, or format manually. Then enter only the match score details.</p>
-        <div class="field-grid">
-          <label data-lb-field="both">Approved registration<select id="admin-lb-registration"><option value="">Approve a registration first</option></select></label>
-          <label data-lb-field="both">Mode<select id="admin-lb-mode"><option value="br">Battle Royale</option><option value="cs">Clash Squad</option></select></label>
-          <label data-lb-field="both">Team<input id="admin-lb-team" placeholder="Team name" /></label>
-          <label data-lb-field="both">Fee<input id="admin-lb-fee" type="number" value="20" /></label>
-          <label data-lb-field="both">Room ID<input id="admin-lb-room" placeholder="BR-SOLO-20-1 / CS-NM-50-1" /></label>
-          <label data-lb-field="br">Battle Royale Format<select id="admin-lb-brformat"><option value="solo">Solo</option><option value="duo">Duo</option><option value="trio">Trio</option><option value="squad">Squad</option></select></label>
-          <label data-lb-field="br">Matches Played<input id="admin-lb-matches" type="number" value="3" /></label>
-          <label data-lb-field="br">Booyah Count<input id="admin-lb-booyah" type="number" value="0" /></label>
-          <label data-lb-field="br">Placement Points<input id="admin-lb-placement" type="number" value="0" /></label>
-          <label data-lb-field="br">Kills<input id="admin-lb-kills" type="number" value="0" /></label>
-          <label data-lb-field="cs">Type<select id="admin-lb-variant"><option value="Normal">Normal</option><option value="One Tap">One Tap</option></select></label>
-          <label data-lb-field="cs">Wins<input id="admin-lb-wins" type="number" value="1" /></label>
-          <label data-lb-field="cs">Losses<input id="admin-lb-losses" type="number" value="0" /></label>
-          <label data-lb-field="cs">Round Difference<input id="admin-lb-rounddiff" type="number" value="0" /></label>
-          <label data-lb-field="both">Penalty<input id="admin-lb-penalty" type="number" value="0" /></label>
-        </div>
-        <div class="admin-actions"><button class="btn small" id="save-leaderboard" type="button">Save Leaderboard Entry</button></div>
-      </article>
+
 
       <article class="admin-box full">
         <h2>Registrations & approvals</h2>
@@ -113,6 +93,13 @@
           <button class="btn small ghost danger" id="clear-registrations" type="button">Clear Registrations</button>
         </div>
         <div id="admin-registrations"></div>
+      </article>
+
+      <article class="admin-box full">
+        <h2>Enter final scores for approved teams</h2>
+        <p>Approved teams appear here automatically with their slot and team name. After matches, enter each team’s final combined score and select <b>Save all scores</b>. Battle Royale scores cover all 3 matches in the selected time window; Clash Squad scores cover its 1 match.</p>
+        <div id="final-score-table"></div>
+        <div class="admin-actions"><button class="btn small" id="save-final-scores" type="button">Save All Scores</button></div>
       </article>
 
       <article class="admin-box full">
@@ -136,8 +123,9 @@
         <h2>How to control the website as admin</h2>
         <ol class="help-list">
           <li><b>Change tournament text:</b> edit <code>data.js</code> for event name, WhatsApp, UPI, date, fee tiers and prize notes.</li>
-          <li><b>Update slots:</b> unlock this page, set confirmed entries/teams for each room, then export state JSON.</li>
-          <li><b>Update leaderboard:</b> add score entries here. In live server mode it appears immediately on the public leaderboard.</li><li><b>Publish room ID/password:</b> use the Room ID & Password box. Players can view it on <code>room-details.html</code> after release.</li>
+          <li><b>Approve entries:</b> review a registration and tap Approve or Reject. Each entry gets a reserved lobby slot from 1–12 when submitted.</li>
+          <li><b>Final scores:</b> approve entries, enter each final score in the team table, and tap Save All Scores. The public leaderboard updates live.</li>
+          <li><b>Publish room ID/password:</b> use the Room ID & Password box. Players can view it on <code>room-details.html</code> after release.</li>
           <li><b>Make updates visible to everyone:</b> open GitHub on your phone, edit <code>data.js</code>, paste the exported values into <code>publishedState</code>, and commit. GitHub Pages updates in 1–3 minutes.</li>
           <li><b>Collect real registrations centrally:</b> connect Google Sheets/Firebase/Supabase later. Static GitHub Pages alone cannot collect every player’s entry in one admin account automatically.</li>
         </ol>
@@ -153,7 +141,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261006-final-dropdown-fix3"></script>
-<script src="site.js?v=20261006-final-dropdown-fix3"></script>
+<script src="data.js?v=20261006-final-v6"></script>
+<script src="site.js?v=20261006-final-v6"></script>
 </body>
 </html>

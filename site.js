@@ -7,6 +7,7 @@ let SERVER_STATE = null;
 let currentAdminPin = "";
 let liveSyncTimer = null;
 let ADMIN_REGISTRATIONS = [];
+let lastStatusSearch = null;
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => Array.from(scope.querySelectorAll(selector));
@@ -15,6 +16,8 @@ function defaultState() {
   return {
     registrations: [],
     roomOverrides: {},
+    approvedSlots: [],
+    approvedTeams: [],
     leaderboard: { br: [], cs: [] },
     notices: [],
     updatedAt: new Date().toISOString()
@@ -30,6 +33,8 @@ function normalizeState(raw = {}) {
     registrationCounts: raw.registrationCounts || {},
     roomOverrides: raw.roomOverrides || {},
     roomDetails: raw.roomDetails || {},
+    approvedSlots: Array.isArray(raw.approvedSlots) ? raw.approvedSlots : [],
+    approvedTeams: Array.isArray(raw.approvedTeams) ? raw.approvedTeams : [],
     leaderboard: {
       br: Array.isArray(raw.leaderboard?.br) ? raw.leaderboard.br : [],
       cs: Array.isArray(raw.leaderboard?.cs) ? raw.leaderboard.cs : []
@@ -105,7 +110,7 @@ function getRoom(roomId) {
 
 function localRegistrationsForRoom(roomId) {
   const state = loadState();
-  return state.registrations.filter((entry) => entry.roomId === roomId && entry.localSlotHeld !== false);
+  return state.registrations.filter((entry) => entry.roomId === roomId && entry.localSlotHeld !== false && String(entry.status || "Pending").toLowerCase() !== "rejected");
 }
 
 function registrationCountForRoom(roomId) {
@@ -216,13 +221,15 @@ function startLiveSync() {
   liveSyncTimer = setInterval(async () => {
     if (!SERVER_AVAILABLE) return;
     const page = document.body.dataset.page;
-    const livePages = ["home", "leaderboard", "rooms", "dashboard", "schedule"];
+    const livePages = ["home", "leaderboard", "rooms", "dashboard", "schedule", "status"];
     if (!livePages.includes(page)) return;
     const ok = await refreshStateFromServer();
     if (ok) {
       renderNotices();
       if (page === "dashboard" && currentAdminPin) {
         renderDashboardData().catch(() => {});
+      } else if (page === "status" && lastStatusSearch) {
+        apiPost("/api/check-status", lastStatusSearch).then(renderStatusResult).catch(() => {});
       } else {
         renderPage();
       }
@@ -269,6 +276,7 @@ function renderPage() {
   if (page === "battle") renderBattlePage();
   if (page === "leaderboard") renderLeaderboardPage();
   if (page === "rooms") renderRoomDetailsPage();
+  if (page === "status") setupStatusPage();
   if (page === "schedule") renderSchedulePage();
   if (page === "admin") setupAdminPage();
   if (page === "dashboard") setupDashboardPage();
@@ -484,7 +492,7 @@ function renderRoomCards(selector, rooms) {
         </div>
         <h3>${escapeHtml(room.title)}</h3>
         <p>${modeLabel} · ${room.matchCount} ${room.matchCount > 1 ? "matches" : "match"} · ${escapeHtml(room.rewardRule)}</p>
-        <div class="slot-line"><span>${confirmed}/${room.capacity} ${label} confirmed/held</span><strong>${left} left</strong></div>
+        <div class="slot-line"><span>${confirmed}/${room.capacity} ${label} reserved/confirmed</span><strong>${left} left</strong></div>
         <div class="progress"><i style="width:${percent}%"></i></div>
         <div class="room-meta">
           <span>${prizeText}</span>
@@ -496,7 +504,17 @@ function renderRoomCards(selector, rooms) {
 }
 
 
+function populateMatchTimeSelects() {
+  const slots = DATA.matchWindows || [];
+  $$('[data-match-time]').forEach((select) => {
+    const current = select.value;
+    select.innerHTML = slots.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)} — ${escapeHtml(item.time)} IST</option>`).join("");
+    select.value = slots.some((item) => item.id === current) ? current : (slots[0]?.id || "slot1");
+  });
+}
+
 function setupCommonRegistration() {
+  populateMatchTimeSelects();
   $$("[data-registration-form]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -507,14 +525,26 @@ function setupCommonRegistration() {
         toast(error, true);
         return;
       }
-      const result = await submitRegistration(data);
-      lastSummary = buildRegistrationSummary(data);
-      showSuccess(lastSummary, data);
-      form.reset();
-      await refreshStateFromServer();
-      renderPage();
-      updateDynamicRoster(form);
-      toast(result.message || "Registration saved. Final slot needs admin confirmation.");
+      try {
+        const result = await submitRegistration(data);
+        if (result.registration) {
+          data.slotNumber = result.registration.slotNumber;
+          data.slotCapacity = result.registration.slotCapacity;
+          data.status = result.registration.status || "Pending";
+          data.scheduleSlotLabel = result.registration.scheduleSlotLabel || data.scheduleSlotLabel;
+          data.scheduleTime = result.registration.scheduleTime || data.scheduleTime;
+        }
+        lastSummary = buildRegistrationSummary(data);
+        showSuccess(lastSummary, data);
+        form.reset();
+        await refreshStateFromServer();
+        renderPage();
+        updateDynamicRoster(form);
+        populateMatchTimeSelects();
+        toast(result.message || "Registration received. Check your lobby and slot for approval status.");
+      } catch (error) {
+        toast(error.message || "Registration could not be submitted.", true);
+      }
     });
   });
 }
@@ -522,12 +552,24 @@ function setupCommonRegistration() {
 async function submitRegistration(data) {
   if (SERVER_AVAILABLE) {
     const result = await apiPost("/api/register", data);
-    return { message: result.message || "Registration saved on live server." };
+    return { message: result.message || "Registration received on the live server.", registration: result.registration };
   }
   const state = loadState();
+  const room = getRoom(data.roomId);
+  const used = new Set((state.registrations || []).filter((entry) => entry.roomId === data.roomId && String(entry.status || "Pending").toLowerCase() !== "rejected").map((entry) => Number(entry.slotNumber || 0)));
+  let slot = null;
+  for (let candidate = 1; candidate <= Number(room?.capacity || 12); candidate += 1) {
+    if (!used.has(candidate)) { slot = candidate; break; }
+  }
+  if (!slot) throw new Error("This lobby has no slots left. Choose another lobby.");
+  data.slotNumber = slot;
+  data.slotCapacity = Number(room?.capacity || 12);
+  data.status = "Pending";
   state.registrations.unshift(data);
+  state.registrationCounts = state.registrationCounts || {};
+  state.registrationCounts[data.roomId] = (state.registrationCounts[data.roomId] || 0) + 1;
   saveState(state);
-  return { message: "Registration saved on this device. Final slot needs admin confirmation." };
+  return { message: `Registration received on this device. Reserved slot ${slot}/${data.slotCapacity}; approval is pending.`, registration: data };
 }
 
 function readRegistrationForm(form, mode) {
@@ -536,6 +578,8 @@ function readRegistrationForm(form, mode) {
   const room = getRoom(roomId);
   const now = new Date();
   const requiredPlayers = mode === "br" ? Number(room?.playersPerEntry || 1) : 4;
+  const scheduleSlot = clean(fd.get("scheduleSlot")) || "slot1";
+  const scheduleWindow = (DATA.matchWindows || []).find((item) => item.id === scheduleSlot) || (DATA.matchWindows || [])[0] || {};
   const iglName = clean(fd.get("iglName")) || clean(fd.get("p1Ign"));
   const iglUid = clean(fd.get("iglUid")) || clean(fd.get("p1Uid"));
   const players = [{ ign: iglName, uid: iglUid }];
@@ -557,6 +601,9 @@ function readRegistrationForm(form, mode) {
     playersPerEntry: requiredPlayers,
     roomId,
     roomTitle: room?.title || roomId,
+    scheduleSlot,
+    scheduleSlotLabel: scheduleWindow.label || "Time Slot 1",
+    scheduleTime: scheduleWindow.time ? `${scheduleWindow.time} IST` : "",
     fee: Number(room?.fee || fd.get("feeTier") || 0),
     feeRule: feeRuleLabel(room || battleFormatById(clean(fd.get("format")))),
     variant: room?.variant || clean(fd.get("variant")),
@@ -582,6 +629,7 @@ function validateRegistration(data) {
   if (digits.length < 10 || digits.length > 13) return "Enter a valid WhatsApp number.";
   const room = getRoom(data.roomId);
   if (!room) return "Please select an available room.";
+  if (!data.scheduleSlot) return "Please select a match time slot.";
   if (slotsLeft(room) <= 0) return "Selected room is full. Please choose another room.";
   const uidPattern = /^\d{6,15}$/;
   for (let i = 0; i < data.players.length; i += 1) {
@@ -609,6 +657,8 @@ function buildRegistrationSummary(data) {
     `Status: ${data.status}`,
     `Mode: ${data.modeLabel}${modeExtra}`,
     `Room: ${data.roomTitle} (${data.roomId})`,
+    `Match Time: ${data.scheduleSlotLabel || "Time Slot 1"} — ${data.scheduleTime || ""}`,
+    `Reserved Slot: ${data.slotNumber ? `#${data.slotNumber}/${data.slotCapacity || 12}` : "Pending"}`,
     `Team/Entry Name: ${data.teamName}`,
     `IGL/Player: ${data.iglName || data.captainName} | ID: ${data.iglUid || "N/A"}`,
     `WhatsApp: ${data.whatsapp}`,
@@ -618,7 +668,7 @@ function buildRegistrationSummary(data) {
     `Players:\n${players}`,
     "",
     `Submitted: ${data.submittedAtDisplay}`,
-    "Note: Final slot is confirmed only after organizer verification."
+    "Note: The slot number is reserved immediately; approval status is still pending until the organizer reviews the registration."
   ].join("\n");
 }
 
@@ -642,7 +692,7 @@ function showSuccess(summary, data) {
   const text = $("#success-text");
   const box = $("#summary-box");
   const whatsapp = $("#whatsapp-link");
-  if (text) text.textContent = `Registration ${data.id} was saved locally. Send this summary to the organizer if required.`;
+  if (text) text.textContent = `Your registration is ${data.status || "Pending"}. Your reserved slot is ${data.slotNumber ? `${data.slotNumber}/${data.slotCapacity || 12}` : "not assigned"}. Use Check Status with the same lobby and slot number to see approval updates.`;
   if (box) box.textContent = summary;
   if (whatsapp) {
     if (DATA.event.whatsappNumber) {
@@ -668,6 +718,31 @@ function getLeaderboard(mode) {
   return [...pub, ...local];
 }
 
+function getApprovedTeamRows(mode) {
+  const state = loadState();
+  let teams = Array.isArray(state.approvedTeams) ? state.approvedTeams : [];
+  if (!teams.length && Array.isArray(state.registrations)) {
+    teams = state.registrations.filter((reg) => String(reg.status || "").toLowerCase() === "approved").map((reg) => ({
+      teamName: reg.teamName,
+      mode: reg.mode,
+      modeLabel: reg.modeLabel,
+      format: reg.format,
+      formatLabel: reg.formatLabel,
+      variant: reg.variant,
+      roomId: reg.roomId,
+      roomTitle: reg.roomTitle,
+      fee: reg.fee,
+      slotNumber: reg.slotNumber,
+      slotCapacity: reg.slotCapacity,
+      scheduleSlotLabel: reg.scheduleSlotLabel,
+      scheduleTime: reg.scheduleTime,
+      players: (reg.players || []).map((player) => player.ign).filter(Boolean),
+      finalScore: reg.finalScore
+    }));
+  }
+  return teams.filter((row) => row.mode === mode || (mode === "br" && row.modeLabel === "Battle Royale") || (mode === "cs" && row.modeLabel === "Clash Squad"));
+}
+
 function brTotal(row) {
   return Number(row.placementPoints || 0) + Number(row.kills || 0) * DATA.scoring.br.killPoint - Number(row.penalty || 0);
 }
@@ -679,37 +754,54 @@ function csTotal(row) {
 function renderLeaderboards(selector, mode) {
   const container = $(selector);
   if (!container) return;
-  const rows = getLeaderboard(mode).sort((a, b) => {
-    if (mode === "br") return brTotal(b) - brTotal(a) || Number(b.kills || 0) - Number(a.kills || 0);
-    return csTotal(b) - csTotal(a) || Number(b.roundDiff || 0) - Number(a.roundDiff || 0);
+  const autoRows = getApprovedTeamRows(mode);
+  const usedKeys = new Set(autoRows.map((row) => `${String(row.teamName || "").toLowerCase()}|${String(row.roomId || "").toLowerCase()}`));
+  const legacyRows = getLeaderboard(mode).filter((row) => !usedKeys.has(`${String(row.teamName || "").toLowerCase()}|${String(row.roomId || "").toLowerCase()}`)).map((row) => ({
+    ...row,
+    slotNumber: row.slotNumber || null,
+    roomTitle: row.roomTitle || row.roomId || "-",
+    players: Array.isArray(row.players) ? row.players : [],
+    finalScore: row.finalScore !== undefined && row.finalScore !== null ? Number(row.finalScore) : (mode === "br" ? brTotal(row) : csTotal(row)),
+    isLegacy: true
+  }));
+  const rows = [...autoRows, ...legacyRows].map((row) => ({
+    ...row,
+    _score: row.finalScore === null || row.finalScore === undefined || row.finalScore === "" ? null : Number(row.finalScore)
+  })).sort((a, b) => {
+    if (a._score === null && b._score !== null) return 1;
+    if (a._score !== null && b._score === null) return -1;
+    if (a._score !== null && b._score !== null && a._score !== b._score) return b._score - a._score;
+    return Number(a.slotNumber || 999) - Number(b.slotNumber || 999) || String(a.teamName || "").localeCompare(String(b.teamName || ""));
   });
 
   if (!rows.length) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <h3>No ${mode === "br" ? "Battle Royale" : "Clash Squad"} results yet</h3>
-        <p>The leaderboard will update after teams are confirmed and match results are verified by admins.</p>
-      </div>
-    `;
+    container.innerHTML = `<div class="empty-state"><h3>No approved ${mode === "br" ? "Battle Royale" : "Clash Squad"} teams yet</h3><p>Once the organizer approves a registration, its slot and team name will appear here automatically. Final score is added after the match.</p></div>`;
     return;
   }
-
+  let rank = 0;
+  let previousScore = null;
   const tableRows = rows.map((row, index) => {
-    if (mode === "br") {
-      return `<tr class="${index < 3 ? "top-row" : ""}">
-        <td>#${index + 1}</td><td>${escapeHtml(row.teamName)}</td><td>${escapeHtml(row.formatLabel || row.format || "Squad")}</td><td>${formatFee(row.fee || row.tier || 0)}</td><td>${escapeHtml(row.roomId || "-")}</td><td>${Number(row.matchesPlayed || 0)}</td><td>${Number(row.booyah || 0)}</td><td>${Number(row.placementPoints || 0)}</td><td>${Number(row.kills || 0)}</td><td>${Number(row.penalty || 0)}</td><td><b>${brTotal(row)}</b></td>
-      </tr>`;
+    if (row._score !== null) {
+      if (previousScore === null || row._score !== previousScore) rank = index + 1;
+      previousScore = row._score;
     }
-    return `<tr class="${index === 0 ? "top-row" : ""}">
-      <td>#${index + 1}</td><td>${escapeHtml(row.teamName)}</td><td>${escapeHtml(row.variant || "Normal")}</td><td>${formatFee(row.fee || row.tier || 0)}</td><td>${escapeHtml(row.roomId || "-")}</td><td>${Number(row.wins || 0)}-${Number(row.losses || 0)}</td><td>${Number(row.roundDiff || 0)}</td><td>${Number(row.penalty || 0)}</td><td><b>${csTotal(row)}</b></td>
+    const displayedRank = row._score === null ? "—" : rank;
+    const format = mode === "br" ? (row.formatLabel || row.format || "Battle Royale") : (row.variant || "Clash Squad");
+    const roster = (row.players || []).filter(Boolean).join(", ") || "Roster submitted";
+    const score = row._score === null ? "Awaiting score" : row._score;
+    return `<tr class="${row._score !== null && rank <= 3 ? "top-row" : ""}">
+      <td>${displayedRank}</td>
+      <td><b>${row.slotNumber ? `#${escapeHtml(row.slotNumber)}/${escapeHtml(row.slotCapacity || 12)}` : "—"}</b></td>
+      <td><strong>${escapeHtml(row.teamName || "-")}</strong><br><small>${escapeHtml(roster)}</small></td>
+      <td>${escapeHtml(format)}</td>
+      <td>${row.fee ? formatFee(row.fee) : "—"}</td>
+      <td>${escapeHtml(row.scheduleTime || row.scheduleSlotLabel || "—")}</td>
+      <td>${escapeHtml(row.roomTitle || "-")}<br><small>${escapeHtml(row.roomId || "")}</small></td>
+      <td><b>${escapeHtml(score)}</b></td>
     </tr>`;
   }).join("");
-
-  if (mode === "br") {
-    container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Entry/Team</th><th>Format</th><th>Fee</th><th>Lobby</th><th>Matches</th><th>Booyah</th><th>Placement</th><th>Kills</th><th>Penalty</th><th>Total</th></tr></thead><tbody>${tableRows}</tbody></table></div>`;
-  } else {
-    container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Team</th><th>Type</th><th>Fee</th><th>Room</th><th>W-L</th><th>Round Diff</th><th>Penalty</th><th>Total</th></tr></thead><tbody>${tableRows}</tbody></table></div>`;
-  }
+  const modeTitle = mode === "br" ? "Battle Royale" : "Clash Squad";
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Slot</th><th>Team / Entry & roster</th><th>Format / Type</th><th>Fee</th><th>Match time</th><th>Lobby / room ID</th><th>Final score</th></tr></thead><tbody>${tableRows}</tbody></table></div><p class="disclaimer">${modeTitle} standings update when entries are approved and when the organizer saves final scores.</p>`;
 }
 
 
@@ -763,11 +855,105 @@ async function renderDashboardData() {
   const table = $("#dashboard-registrations");
   if (table) {
     const regs = summary.registrations || [];
-    table.innerHTML = regs.length ? `<div class="table-wrap"><table><thead><tr><th>Status</th><th>ID</th><th>Mode</th><th>Format</th><th>Room</th><th>Entry/Team</th><th>IGL/Player</th><th>Player details</th><th>WhatsApp</th><th>Fee</th><th>Payment</th></tr></thead><tbody>${regs.map((r) => `<tr><td>${registrationStatusBadge(r.status)}</td><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(r.formatLabel || r.variant || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.iglName || r.captainName)}</td><td>${playerListHtml(r)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatFee(r.fee)}</td><td>${escapeHtml(r.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><h3>No registrations yet</h3><p>Registrations will appear live here.</p></div>`;
+    table.innerHTML = regs.length ? `<div class="table-wrap"><table><thead><tr><th>Status</th><th>Slot</th><th>ID</th><th>Mode</th><th>Format</th><th>Match time</th><th>Room</th><th>Entry/Team</th><th>IGL/Player</th><th>Player details</th><th>WhatsApp</th><th>Fee</th><th>Payment</th></tr></thead><tbody>${regs.map((r) => `<tr><td>${registrationStatusBadge(r.status)}</td><td>${slotLabel(r)}</td><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(r.formatLabel || r.variant || "-")}</td><td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.iglName || r.captainName)}</td><td>${playerListHtml(r)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatFee(r.fee)}</td><td>${escapeHtml(r.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><h3>No registrations yet</h3><p>Registrations will appear live here.</p></div>`;
   }
 }
 
+function slotLabel(reg) {
+  if (!reg || !reg.slotNumber) return "-";
+  const roomCapacity = getRoom(reg.roomId)?.capacity || (String(reg.roomId || "").startsWith("CS-") ? 2 : 12);
+  return `#${escapeHtml(reg.slotNumber)}/${escapeHtml(roomCapacity)}`;
+}
+
+function setupStatusPage() {
+  populateStatusRoomSelect();
+  const button = $("#check-slot-status");
+  if (button && button.dataset.bound !== "true") {
+    button.addEventListener("click", checkStatusBySlot);
+    button.dataset.bound = "true";
+  }
+}
+
+function populateStatusRoomSelect() {
+  const select = $("#status-room");
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = `<option value="">Select your exact lobby</option>` + DATA.rooms.map((room) => `<option value="${escapeHtml(room.id)}">${escapeHtml(room.title)} · ${escapeHtml(room.id)}</option>`).join("");
+  if (DATA.rooms.some((room) => room.id === current)) select.value = current;
+}
+
+async function checkStatusBySlot() {
+  const roomId = $("#status-room")?.value;
+  const slotNumber = Number(clean($("#status-slot")?.value));
+  if (!roomId) return toast("Select the same lobby you chose when registering.", true);
+  if (!Number.isInteger(slotNumber) || slotNumber < 1 || slotNumber > 12) return toast("Enter a slot number from 1 to 12.", true);
+  try {
+    let result;
+    lastStatusSearch = { roomId, slotNumber };
+    if (SERVER_AVAILABLE) {
+      result = await apiPost("/api/check-status", lastStatusSearch);
+    } else {
+      const state = loadState();
+      const reg = (state.registrations || []).find((item) => String(item.roomId) === roomId && Number(item.slotNumber) === slotNumber);
+      result = reg ? {
+        found: true,
+        status: reg.status || "Pending",
+        teamName: reg.teamName,
+        roomId: reg.roomId,
+        roomTitle: reg.roomTitle,
+        slotNumber: reg.slotNumber,
+        slotCapacity: reg.slotCapacity || getRoom(reg.roomId)?.capacity || 12,
+        modeLabel: reg.modeLabel,
+        formatLabel: reg.formatLabel,
+        variant: reg.variant,
+        scheduleSlotLabel: reg.scheduleSlotLabel,
+        scheduleTime: reg.scheduleTime
+      } : { found: false, message: "No registration uses that lobby and slot number. Check the selected lobby and try again." };
+    }
+    renderStatusResult(result);
+  } catch (error) {
+    toast(error.message || "Could not check slot.", true);
+  }
+}
+
+function renderStatusResult(result) {
+  const box = $("#status-result");
+  if (!box) return;
+  if (!result?.found) {
+    box.innerHTML = `<div class="empty-state"><h3>No record found</h3><p>${escapeHtml(result?.message || "Check the selected lobby and slot number, then try again.")}</p></div>`;
+    return;
+  }
+  const status = String(result.status || "Pending");
+  const statusKey = status.toLowerCase();
+  const cls = statusKey === "approved" ? "open" : statusKey === "rejected" ? "closed" : "few";
+  const slotText = result.slotNumber ? `Slot ${result.slotNumber}/${result.slotCapacity || 12}` : "Slot not assigned";
+  const statusMessage = statusKey === "approved" ? "Your entry is approved. Join only through the official Room Details page when the organizer releases the room." : statusKey === "rejected" ? "Your entry was not approved. Contact the organizer if you think this is a mistake." : "Your entry is pending. The organizer has not approved it yet.";
+  box.innerHTML = `
+    <article class="room-card ${cls}">
+      <div class="room-card-head"><span class="status-pill ${cls}">${escapeHtml(status)}</span><b>${escapeHtml(slotText)}</b></div>
+      <h3>${escapeHtml(result.teamName || "Tournament entry")}</h3>
+      <p>${escapeHtml(result.modeLabel || "")} ${result.formatLabel || result.variant ? `· ${escapeHtml(result.formatLabel || result.variant)}` : ""}</p>
+      <div class="note-box"><p><b>Lobby:</b> ${escapeHtml(result.roomTitle || result.roomId || "-")}</p><p><b>Match time:</b> ${escapeHtml(result.scheduleTime || result.scheduleSlotLabel || "To be announced")}</p><p>${escapeHtml(statusMessage)}</p></div>
+    </article>
+  `;
+}
+
+
 function renderSchedulePage() {
+  const windows = $("#match-windows");
+  if (windows) {
+    windows.innerHTML = (DATA.matchWindows || []).map((item, index) => `
+      <article class="timeline-card match-window-card">
+        <span>${String(index + 1).padStart(2, "0")}</span>
+        <div><b>${escapeHtml(item.label)} · ${escapeHtml(item.time)} IST</b>
+          <div class="match-window-modes">
+            <p><strong>Battle Royale:</strong> 3 matches played within this one-hour window.</p>
+            <p><strong>Clash Squad:</strong> 1 match played within this one-hour window.</p>
+          </div>
+        </div>
+      </article>
+    `).join("");
+  }
   const container = $("#schedule-list");
   if (!container) return;
   container.innerHTML = DATA.schedule.map((item, index) => `
@@ -777,6 +963,7 @@ function renderSchedulePage() {
     </article>
   `).join("");
 }
+
 
 function setupAdminPage() {
   const unlock = $("#admin-unlock");
@@ -820,6 +1007,7 @@ function setupAdminListeners() {
   $("#admin-variant")?.addEventListener("change", updateAdminRoomChoices);
   $("#save-room-count")?.addEventListener("click", saveAdminRoomCount);
   $("#save-leaderboard")?.addEventListener("click", saveAdminLeaderboardEntry);
+  $("#save-final-scores")?.addEventListener("click", saveFinalScores);
   $("#admin-lb-mode")?.addEventListener("change", updateLeaderboardFormMode);
   $("#admin-lb-registration")?.addEventListener("change", (event) => applyApprovedRegistrationToLeaderboard(event.target.value));
   $("#export-registrations")?.addEventListener("click", exportRegistrationsCsv);
@@ -1022,15 +1210,17 @@ async function renderAdminTables() {
   }
 
   updateApprovedTeamSelect();
+  renderFinalScoreTable();
 
   const regs = $("#admin-registrations");
   if (regs) {
     if (!state.registrations.length) {
       regs.innerHTML = `<div class="empty-state"><h3>No registrations yet</h3><p>Live registrations will appear here after players submit forms.</p></div>`;
     } else {
-      regs.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Status</th><th>Actions</th><th>ID</th><th>Mode</th><th>Format/Type</th><th>Room</th><th>Team/Entry</th><th>IGL/Player</th><th>Players</th><th>WhatsApp</th><th>Fee</th><th>Payment Ref</th><th>Time</th></tr></thead><tbody>${state.registrations.map((r) => `
+      regs.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Status</th><th>Slot</th><th>Actions</th><th>ID</th><th>Mode</th><th>Format/Type</th><th>Match time</th><th>Room</th><th>Team/Entry</th><th>IGL/Player</th><th>Players</th><th>WhatsApp</th><th>Fee</th><th>Payment Ref</th><th>Time</th></tr></thead><tbody>${state.registrations.map((r) => `
         <tr>
           <td>${registrationStatusBadge(r.status)}</td>
+          <td>${slotLabel(r)}</td>
           <td class="admin-row-actions">
             <button class="btn small" type="button" data-reg-action="Approved" data-reg-id="${escapeHtml(r.id)}">Approve</button>
             <button class="btn small ghost danger" type="button" data-reg-action="Rejected" data-reg-id="${escapeHtml(r.id)}">Reject</button>
@@ -1038,6 +1228,7 @@ async function renderAdminTables() {
           <td>${escapeHtml(r.id)}</td>
           <td>${escapeHtml(r.modeLabel)}</td>
           <td>${escapeHtml(r.formatLabel || r.variant || "-")}</td>
+          <td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td>
           <td>${escapeHtml(r.roomId)}</td>
           <td>${escapeHtml(r.teamName)}</td>
           <td>${escapeHtml(r.iglName || r.captainName)}<br><small>${escapeHtml(r.iglUid || r.players?.[0]?.uid || "")}</small></td>
@@ -1056,26 +1247,91 @@ async function renderAdminTables() {
   renderLeaderboards("#admin-cs-preview", "cs");
 }
 
+function renderFinalScoreTable() {
+  const box = $("#final-score-table");
+  if (!box) return;
+  const approved = ADMIN_REGISTRATIONS.filter((reg) => String(reg.status || "").toLowerCase() === "approved").sort((a, b) => String(a.roomId || "").localeCompare(String(b.roomId || "")) || Number(a.slotNumber || 99) - Number(b.slotNumber || 99));
+  if (!approved.length) {
+    box.innerHTML = `<div class="empty-state"><h3>No approved teams to score yet</h3><p>Approve registrations above. Each approved entry will appear here with its slot number and team name.</p></div>`;
+    return;
+  }
+  const rows = approved.map((reg) => `
+    <tr>
+      <td><b>${slotLabel(reg)}</b></td>
+      <td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td>
+      <td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(reg.formatLabel || reg.variant || "-")}</td>
+      <td>${reg.fee ? formatFee(reg.fee) : "—"}</td>
+      <td>${escapeHtml(reg.scheduleTime || reg.scheduleSlotLabel || "To be announced")}</td>
+      <td>${escapeHtml(reg.roomTitle || "-")}<br><small>${escapeHtml(reg.roomId || "")}</small></td>
+      <td><input class="score-input" type="number" min="0" max="99999" step="1" inputmode="numeric" data-final-score-id="${escapeHtml(reg.id)}" value="${reg.finalScore === null || reg.finalScore === undefined ? "" : escapeHtml(reg.finalScore)}" placeholder="Final score" aria-label="Final score for ${escapeHtml(reg.teamName || "team")}" /></td>
+    </tr>`).join("");
+  box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Slot</th><th>Team & roster</th><th>Mode / format</th><th>Fee</th><th>Match time</th><th>Lobby / room ID</th><th>Final score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+async function saveFinalScores() {
+  const fields = $$('[data-final-score-id]');
+  if (!fields.length) return toast("Approve at least one registration first.", true);
+  const scores = [];
+  for (const field of fields) {
+    const raw = field.value.trim();
+    if (raw === "") {
+      scores.push({ registrationId: field.dataset.finalScoreId, finalScore: null });
+      continue;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0 || value > 99999) return toast("Enter final scores from 0 to 99,999.", true);
+    scores.push({ registrationId: field.dataset.finalScoreId, finalScore: value });
+  }
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/final-scores", { pin: currentAdminPin, scores });
+      await refreshStateFromServer();
+      await renderAdminTables();
+      toast("Final scores saved. The public leaderboard will update live.");
+      return;
+    }
+    const state = loadState();
+    scores.forEach((item) => {
+      const reg = (state.registrations || []).find((entry) => String(entry.id) === String(item.registrationId));
+      if (!reg || String(reg.status || "").toLowerCase() !== "approved") return;
+      if (item.finalScore === null) delete reg.finalScore;
+      else reg.finalScore = item.finalScore;
+    });
+    saveState(state);
+    ADMIN_REGISTRATIONS = state.registrations || [];
+    await renderAdminTables();
+    toast("Final scores saved on this device.");
+  } catch (error) {
+    toast(error.message || "Could not save final scores.", true);
+  }
+}
+
 function updateApprovedTeamSelect() {
   const select = $("#admin-lb-registration");
   if (!select) return;
   const approved = ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved");
-  select.innerHTML = `<option value="">Select approved team/player</option>` + approved.map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.teamName)} — ${escapeHtml(r.formatLabel || r.variant || r.modeLabel)} — ${escapeHtml(r.roomId)}</option>`).join("");
+  select.innerHTML = `<option value="">Select approved team/player</option>` + approved.map((r) => `<option value="${escapeHtml(r.id)}">#${escapeHtml(r.slotNumber || "-")} ${escapeHtml(r.teamName)} — ${escapeHtml(r.formatLabel || r.variant || r.modeLabel)} — ${escapeHtml(r.roomId)}</option>`).join("");
 }
 
 async function updateRegistrationStatus(registrationId, status) {
   if (!registrationId) return;
   if (SERVER_AVAILABLE && currentAdminPin) {
-    await apiPost("/api/admin/registration-status", { pin: currentAdminPin, registrationId, status });
+    const result = await apiPost("/api/admin/registration-status", { pin: currentAdminPin, registrationId, status });
     await refreshStateFromServer();
     await renderAdminTables();
     renderPage();
-    toast(`Registration marked ${status}. Public slots updated live.`);
+    const slotText = result.registration?.slotNumber ? ` Slot ${result.registration.slotNumber}/${result.registration.slotCapacity} assigned.` : "";
+    toast(`Registration marked ${status}.${slotText}`);
     return;
   }
   const state = loadState();
   const reg = state.registrations.find((r) => r.id === registrationId);
   if (reg) reg.status = status;
+  state.registrationCounts = {};
+  (state.registrations || []).forEach((entry) => {
+    if (String(entry.status || "Pending").toLowerCase() === "rejected") return;
+    state.registrationCounts[entry.roomId] = Number(state.registrationCounts[entry.roomId] || 0) + 1;
+  });
   saveState(state);
   await renderAdminTables();
   renderPage();
@@ -1132,10 +1388,10 @@ async function exportRegistrationsCsv() {
     state = normalizeState({ ...state, registrations: summary.registrations || [] });
   }
   if (!state.registrations.length) return toast("No registrations to export.", true);
-  const headers = ["id", "mode", "formatOrType", "playersPerEntry", "roomId", "fee", "feeRule", "teamName", "iglName", "iglUid", "whatsapp", "paymentRef", "submittedAt", "p1Name", "p1Uid", "p2Name", "p2Uid", "p3Name", "p3Uid", "p4Name", "p4Uid"];
+  const headers = ["id", "status", "slotNumber", "mode", "formatOrType", "playersPerEntry", "scheduleTime", "roomId", "fee", "feeRule", "teamName", "finalScore", "iglName", "iglUid", "whatsapp", "paymentRef", "submittedAt", "p1Name", "p1Uid", "p2Name", "p2Uid", "p3Name", "p3Uid", "p4Name", "p4Uid"];
   const rows = state.registrations.map((r) => {
     const flat = {
-      id: r.id, mode: r.modeLabel, formatOrType: r.formatLabel || r.variant || "", playersPerEntry: r.playersPerEntry || "", roomId: r.roomId, fee: r.fee, feeRule: r.feeRule || "", teamName: r.teamName, iglName: r.iglName || r.captainName, iglUid: r.iglUid || r.players?.[0]?.uid, whatsapp: r.whatsapp, paymentRef: r.paymentRef, submittedAt: r.submittedAt,
+      id: r.id, status: r.status, slotNumber: r.slotNumber, mode: r.modeLabel, formatOrType: r.formatLabel || r.variant || "", playersPerEntry: r.playersPerEntry || "", scheduleTime: r.scheduleTime || r.scheduleSlotLabel || "", roomId: r.roomId, fee: r.fee, feeRule: r.feeRule || "", teamName: r.teamName, finalScore: r.finalScore ?? "", iglName: r.iglName || r.captainName, iglUid: r.iglUid || r.players?.[0]?.uid, whatsapp: r.whatsapp, paymentRef: r.paymentRef, submittedAt: r.submittedAt,
       p1Name: r.players?.[0]?.ign, p1Uid: r.players?.[0]?.uid, p2Name: r.players?.[1]?.ign, p2Uid: r.players?.[1]?.uid, p3Name: r.players?.[2]?.ign, p3Uid: r.players?.[2]?.uid, p4Name: r.players?.[3]?.ign, p4Uid: r.players?.[3]?.uid
     };
     return headers.map((h) => csvEscape(flat[h])).join(",");

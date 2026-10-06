@@ -3,10 +3,10 @@
   const csFeeTiers = [50, 70, 90, 100];
   const roomsPerTier = 5;
   const battleFormats = [
-    { id: "solo", label: "Solo", playersPerEntry: 1, capacity: 48, description: "For players who want to play alone. 48 solo entries per lobby." },
-    { id: "duo", label: "Duo", playersPerEntry: 2, capacity: 24, description: "For two-player teams. 24 duo teams per lobby." },
-    { id: "trio", label: "Trio", playersPerEntry: 3, capacity: 16, description: "For three-player teams. 16 trio teams per lobby." },
-    { id: "squad", label: "Squad", playersPerEntry: 4, capacity: 12, description: "For full four-player squads. 12 squad teams per lobby." }
+    { id: "solo", label: "Solo", playersPerEntry: 1, capacity: 12, description: "For solo players. Slots are numbered 1–12 per lobby." },
+    { id: "duo", label: "Duo", playersPerEntry: 2, capacity: 12, description: "For two-player teams. Up to 12 teams per lobby." },
+    { id: "trio", label: "Trio", playersPerEntry: 3, capacity: 12, description: "For three-player teams. Up to 12 teams per lobby." },
+    { id: "squad", label: "Squad", playersPerEntry: 4, capacity: 12, description: "For full four-player squads. Up to 12 teams per lobby." }
   ];
   const rooms = [];
 
@@ -63,7 +63,7 @@
       supportChannel: "Official WhatsApp group/contact to be added",
       whatsappNumber: "",
       upiId: "yourupi@bank",
-      adminPin: "2020",
+      adminPin: "2026",
       disclaimer: "This is a student-organized tournament portal for a Free Fire event around NIT Hamirpur. It is not affiliated with, endorsed by, or sponsored by Garena or Free Fire. Use institute-official wording only after proper permission."
     },
     economics: {
@@ -93,12 +93,16 @@
       }
     },
     rooms,
+    matchWindows: [
+      { id: "slot1", label: "Time Slot 1", time: "9:00 PM–10:00 PM", note: "Battle Royale: 3 matches in this hour. Clash Squad: 1 match in this hour." },
+      { id: "slot2", label: "Time Slot 2", time: "10:00 PM–11:00 PM", note: "Battle Royale: 3 matches in this hour. Clash Squad: 1 match in this hour." },
+      { id: "slot3", label: "Time Slot 3", time: "11:00 PM–12:00 AM", note: "Battle Royale: 3 matches in this hour. Clash Squad: 1 match in this hour." }
+    ],
     schedule: [
-      { time: "TBA", title: "Registration opens", detail: "Players choose fee tier, room, and mode/format." },
-      { time: "TBA", title: "Admin verification", detail: "Organizer confirms payment and slot availability." },
-      { time: "15 minutes before match", title: "Room ID shared privately", detail: "Room ID/password are shared only through the official Room Details page after admin release." },
-      { time: "Match time", title: "Battle Royale / Clash Squad", detail: "Battle Royale has 3 matches per lobby. Clash Squad has 1 match per room." },
-      { time: "After verification", title: "Leaderboard and payout", detail: "Scores are updated after screenshots/recordings and fair-play checks." }
+      { time: "Before match day", title: "Registration and admin verification", detail: "Players choose a mode, format, lobby, and one of the three match time slots. Registration receives a reserved lobby slot number from 1 to 12; organizer approval is still required." },
+      { time: "15 minutes before match", title: "Room ID shared privately", detail: "Room ID/password are shared only through the Room Details page after admin release." },
+      { time: "Match window", title: "Play the scheduled matches", detail: "Battle Royale teams play 3 matches within their assigned one-hour window. Clash Squad teams play 1 match within their assigned one-hour window." },
+      { time: "After result verification", title: "Final scores and leaderboard", detail: "Admin enters the final score for each approved team. The leaderboard updates automatically." }
     ],
     publishedState: {
       roomOverrides: {},
@@ -106,7 +110,8 @@
       roomDetails: {},
       leaderboard: { br: [], cs: [] },
       notices: [
-        "Slots shown are admin-confirmed or registered on the live server. Final slot is valid only after organizer confirmation.",
+        "Each lobby uses slot numbers 1–12. A submitted slot is reserved while approval is pending.",
+        "All listed match times use India Standard Time (IST); the event date will be announced by the organizers.",
         "Solo, Duo, Trio and Squad Battle Royale sections are available for players with or without a full team.",
         "Clash Squad entry starts directly from ₹50.",
         "Room ID/password will appear on the Room Details page only after admin release."

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Battle Royale Registration | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Register for Battle Royale lobbies with 12 teams, 3 matches and top 3 leaderboard selection." />
-  <link rel="stylesheet" href="styles.css?v=20261006-final-dropdown-fix3" />
+  <link rel="stylesheet" href="styles.css?v=20261006-final-v6" />
 </head>
 <body data-page="battle" id="top">
 <header class="site-header">
@@ -20,6 +20,7 @@
     <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
     <a href="rules.html" data-nav="rules">Rules</a>
     <a href="leaderboard.html" data-nav="leaderboard">Leaderboard</a>
+    <a href="status-check.html" data-nav="status">Check Status</a>
     <a href="room-details.html" data-nav="rooms">Room Details</a>
     <a href="schedule-results.html" data-nav="schedule">Schedule</a>
     <a href="admin.html" data-nav="admin">Admin</a>
@@ -32,7 +33,7 @@
     <div class="reveal">
       <span class="eyebrow"><span class="pulse-dot"></span> Battle Royale</span>
       <h1 class="page-title"><span>Solo, Duo, Trio, Squad</span> Battle Royale.</h1>
-      <p class="page-lead">Players can join alone or with a team. Solo has 48 player slots, Duo has 24 teams, Trio has 16 teams, and Squad has 12 teams. Every lobby plays 3 matches and the top 3 entries/teams are selected after verification.</p>
+      <p class="page-lead">Players can join alone or with a team. Each Battle Royale lobby has up to 12 numbered entries/teams (slots 1–12). Every lobby plays 3 matches and the top 3 entries/teams are selected after verification.</p>
     </div>
   </section>
 
@@ -56,12 +57,12 @@
     <div class="form-grid">
       <div class="note-box">
         <h2>Battle Royale format</h2>
-        <p>Solo: 48 players. Duo: 24 teams. Trio: 16 teams. Squad: 12 teams. Three matches will be played. Top 3 entries/teams are selected by cumulative score: placement points + kill points - penalties.</p>
+        <p>Each lobby holds up to 12 entries/teams (slots 1–12). Three matches will be played within the selected one-hour time window. Top 3 entries/teams are selected by cumulative score: placement points + kill points - penalties.</p>
         <p>Room ID/password will be shared privately. Screenshots/recordings may be required for result verification.</p>
       </div>
       <form class="form-card" data-registration-form data-mode="br">
   <h2>Battle Royale Registration</h2>
-  <p>Entry starts from ₹20. Solo fee is per player; Duo, Trio and Squad fee is per team. Final slot is confirmed only by the organizer.</p>
+  <p>Entry starts from ₹20. Solo fee is per player; Duo, Trio and Squad fee is per team. A lobby slot number is reserved when you register; your approval status remains pending until the organizer reviews it.</p>
   <div class="field-grid">
     <label>Entry / Team Name<input name="teamName" placeholder="Optional for Solo, example: NITH Warriors" /></label>
     <label>IGL / Player Name<input required name="iglName" placeholder="Solo player or team IGL name" /></label>
@@ -72,6 +73,9 @@
 </label>
 <label>Custom Lobby
   <select name="roomId" id="br-room-select" required></select>
+</label>
+<label>Match Time Slot
+  <select name="scheduleSlot" data-match-time required></select>
 </label>
   </div>
   <div class="player-section">
@@ -106,9 +110,10 @@
     <pre id="summary-box"></pre>
     <div class="modal-actions">
       <button class="btn small" id="copy-summary" type="button">Copy Summary</button>
+      <a class="btn small ghost" href="status-check.html">Check Approval Status</a>
       <a class="btn small ghost hidden" id="whatsapp-link" target="_blank" rel="noopener">Send on WhatsApp</a>
     </div>
-    <p class="disclaimer">Static mode note: final slot is valid only after organizer confirmation.</p>
+    <p class="disclaimer">Your assigned slot is reserved immediately. Approval is pending until organizer review. Use Check Status with the same lobby and slot number.</p>
   </div>
 </dialog>
 <footer class="footer">
@@ -119,7 +124,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261006-final-dropdown-fix3"></script>
-<script src="site.js?v=20261006-final-dropdown-fix3"></script>
+<script src="data.js?v=20261006-final-v6"></script>
+<script src="site.js?v=20261006-final-v6"></script>
 </body>
 </html>

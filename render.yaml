@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: nith-free-fire-tournament
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: TOURNAMENT_ADMIN_PIN
+        sync: false

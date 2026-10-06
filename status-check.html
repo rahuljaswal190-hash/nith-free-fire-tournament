@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Admin Live Dashboard | NIT Hamirpur Free Fire Tournament</title>
-  <meta name="description" content="Admin-only live dashboard for registrations, players and payments." />
+  <title>Check Registration Status | NIT Hamirpur Free Fire Tournament</title>
+  <meta name="description" content="Check whether your Free Fire tournament registration is pending, approved, or rejected, and view assigned slot number." />
   <link rel="stylesheet" href="styles.css?v=20261006-final-v6" />
 </head>
-<body data-page="dashboard" id="top">
+<body data-page="status" id="top">
 <header class="site-header">
   <a class="brand" href="index.html" aria-label="NIT Hamirpur Free Fire Tournament home">
     <span class="brand-mark">NITH</span>
@@ -31,28 +31,27 @@
 <main>
   <section class="hero compact">
     <div class="reveal">
-      <span class="eyebrow">Admin dashboard</span>
-      <h1 class="page-title">Live registrations, players and <span>payment totals</span>.</h1>
-      <p class="page-lead">Unlock with the admin PIN set in Render under TOURNAMENT_ADMIN_PIN to see registrations, approved players, and payment totals.</p>
+      <span class="eyebrow"><span class="pulse-dot"></span> Approval status</span>
+      <h1 class="page-title">Check approval and <span>assigned slot</span>.</h1>
+      <p class="page-lead">Every entry receives a reserved slot number from 1 to 12 when it is submitted. Use the same lobby and slot number to see whether the organizer has approved it.</p>
     </div>
   </section>
 
   <section class="section">
-    <div class="admin-box">
-      <h2>Unlock dashboard</h2>
-      <div class="filters">
-        <label>Admin PIN<input id="dashboard-pin" type="password" inputmode="numeric" placeholder="Enter PIN" /></label>
-        <button class="btn" id="dashboard-unlock" type="button">Unlock Dashboard</button>
+    <article class="form-card status-check-card">
+      <h2>Check with your lobby and slot number</h2>
+      <p>Select the exact lobby shown in your registration confirmation, then enter your assigned slot number from 1 to 12.</p>
+      <div class="field-grid">
+        <label>Your lobby<select id="status-room" required></select></label>
+        <label>Slot number (1–12)<input id="status-slot" type="number" min="1" max="12" step="1" inputmode="numeric" placeholder="Enter your slot" required /></label>
       </div>
-    </div>
+      <div class="admin-actions"><button class="btn small" id="check-slot-status" type="button">Check Approval Status</button></div>
+    </article>
   </section>
 
-  <section class="section hidden" id="dashboard-panel">
-    <div class="stats-grid" id="admin-live-summary"></div>
-    <div class="admin-box full">
-      <h2>Registered entries</h2>
-      <div id="dashboard-registrations"></div>
-    </div>
+  <section class="section">
+    <div class="section-head"><span class="eyebrow">Result</span><h2>Your status result</h2></div>
+    <div id="status-result"><div class="empty-state"><h3>No status checked yet</h3><p>Enter the same lobby you registered in and your slot number (1–12).</p></div></div>
   </section>
 </main>
 

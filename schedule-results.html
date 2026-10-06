@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Schedule and Results | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Tournament schedule, check-in flow and results process." />
-  <link rel="stylesheet" href="styles.css?v=20261006-final-dropdown-fix3" />
+  <link rel="stylesheet" href="styles.css?v=20261006-final-v6" />
 </head>
 <body data-page="schedule" id="top">
 <header class="site-header">
@@ -20,6 +20,7 @@
     <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
     <a href="rules.html" data-nav="rules">Rules</a>
     <a href="leaderboard.html" data-nav="leaderboard">Leaderboard</a>
+    <a href="status-check.html" data-nav="status">Check Status</a>
     <a href="room-details.html" data-nav="rooms">Room Details</a>
     <a href="schedule-results.html" data-nav="schedule">Schedule</a>
     <a href="admin.html" data-nav="admin">Admin</a>
@@ -32,11 +33,17 @@
     <div class="reveal">
       <span class="eyebrow">Schedule & Results</span>
       <h1 class="page-title">Clear flow from <span>registration to payout</span>.</h1>
-      <p class="page-lead">Use this page to show timings, check-in process, room-sharing steps, and result verification. Update exact date/time in <code>data.js</code> when ready.</p>
+      <p class="page-lead">Match windows are 9 PM to midnight India Standard Time (IST). The exact event date will be announced by the student organizers.</p>
     </div>
   </section>
 
   <section class="section">
+    <div class="section-head"><span class="eyebrow">Match windows · IST</span><h2>Battle Royale and Clash Squad timings</h2><p>Teams choose one time window during registration. Battle Royale plays three matches within that hour; Clash Squad plays one match within that hour.</p></div>
+    <div class="timeline" id="match-windows"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><span class="eyebrow">Event flow</span><h2>Registration to verified results</h2></div>
     <div class="timeline" id="schedule-list"></div>
   </section>
 
@@ -55,7 +62,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261006-final-dropdown-fix3"></script>
-<script src="site.js?v=20261006-final-dropdown-fix3"></script>
+<script src="data.js?v=20261006-final-v6"></script>
+<script src="site.js?v=20261006-final-v6"></script>
 </body>
 </html>
