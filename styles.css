@@ -537,3 +537,10 @@ td small { color: var(--muted); }
   .cs-score-editor { grid-template-columns: 1fr; }
   .admin-row-actions { min-width: 230px; }
 }
+
+/* Visible success acknowledgement for completed admin actions */
+.admin-confirmation-modal { width: min(520px, calc(100% - 28px)); }
+.admin-confirmation-inner .success-icon { margin-bottom: 14px; }
+.admin-confirmation-inner h2 { margin: 10px 42px 10px 0; }
+.admin-confirmation-inner > p { line-height: 1.65; }
+.admin-confirmation-inner .modal-actions { margin-top: 18px; }

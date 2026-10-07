@@ -777,6 +777,22 @@ function setupModal() {
   });
 }
 
+function showAdminConfirmation(title, message) {
+  const modal = $("#admin-confirmation-modal");
+  if (!modal) return toast(`${title}: ${message}`);
+  const titleNode = $("#admin-confirmation-title");
+  const messageNode = $("#admin-confirmation-message");
+  const timeNode = $("#admin-confirmation-time");
+  if (titleNode) titleNode.textContent = title;
+  if (messageNode) messageNode.textContent = message;
+  if (timeNode) timeNode.textContent = `Confirmed ${new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}`;
+  if (typeof modal.showModal === "function") {
+    if (!modal.open) modal.showModal();
+  } else {
+    toast(`${title}: ${message}`);
+  }
+}
+
 function showSuccess(summary, data) {
   const modal = $("#success-modal");
   const text = $("#success-text");
@@ -1160,7 +1176,8 @@ function setupAdminPage() {
   const unlock = $("#admin-unlock");
   const pin = $("#admin-pin");
   const panel = $("#admin-panel");
-  if (!unlock || !panel) return;
+  if (!unlock || !panel || unlock.dataset.bound === "true") return;
+  unlock.dataset.bound = "true";
 
   unlock.addEventListener("click", async () => {
     const enteredPin = pin.value.trim();
@@ -1219,6 +1236,8 @@ function setupAdminListeners() {
   $("#edit-registration-form")?.addEventListener("submit", saveRegistrationEdits);
   $("#edit-registration-close")?.addEventListener("click", () => $("#edit-registration-modal")?.close());
   $("#edit-registration-cancel")?.addEventListener("click", () => $("#edit-registration-modal")?.close());
+  $("#admin-confirmation-close")?.addEventListener("click", () => $("#admin-confirmation-modal")?.close());
+  $("#admin-confirmation-ok")?.addEventListener("click", () => $("#admin-confirmation-modal")?.close());
 }
 
 function renderAdminPanel() {
@@ -1269,7 +1288,7 @@ async function saveAdminRoomCount() {
     await refreshStateFromServer();
     renderAdminTables();
     renderPage();
-    toast("Room count updated live for everyone.");
+    showAdminConfirmation("Room count updated", `${room.title}: ${count}/${room.capacity} ${entryLabel(room)} recorded. Availability has been refreshed.`);
     return;
   }
   const state = loadState();
@@ -1277,7 +1296,7 @@ async function saveAdminRoomCount() {
   saveState(state);
   renderAdminTables();
   renderPage();
-  toast("Room count updated locally. Export/publish state for players to see it globally.");
+  showAdminConfirmation("Room count saved on this device", `${room.title}: ${count}/${room.capacity} ${entryLabel(room)} recorded locally. A shared backend is needed to publish this count to all players.`);
 }
 
 function updateRoomShareChoices() {
@@ -1362,13 +1381,19 @@ async function saveRoomDetails() {
       await refreshStateFromServer();
       await renderAdminTables();
       renderPage();
-      toast("Room ID/password and optional QR saved live according to your release settings.");
+      const roomSaveTitle = published ? "Room details saved" : "Room details saved but hidden";
+      const roomSaveMessage = !published
+        ? "The ID/password and optional QR are stored, but Publish on Room Details page is turned off, so players cannot see them yet."
+        : forcePublish
+          ? "The ID/password and optional QR were published and released to players now."
+          : "The ID/password and optional QR were published; players will see them when the lobby is full. Enable Force release to show them sooner.";
+      showAdminConfirmation(roomSaveTitle, roomSaveMessage);
       return;
     }
     const state = loadState();
     state.roomDetails[roomId] = detail;
     saveState(state);
-    toast("Room details saved locally on this device.");
+    showAdminConfirmation("Room details saved on this device", "The ID/password and optional QR are saved locally. A shared backend is needed to publish them to all players.");
     renderRoomDetailsPage();
   } catch (error) {
     toast(error.message || "Could not save room details.", true);
@@ -1407,7 +1432,7 @@ async function saveScheduleSettings() {
       await refreshStateFromServer();
       await renderAdminTables();
       renderSchedulePage();
-      toast("Separate BR and CS times saved and published live.");
+      showAdminConfirmation("Match schedule published", "Separate BR and CS times, durations, and gaps are saved. The public schedule and lobby selectors will use these settings.");
       return;
     }
     const state = loadState();
@@ -1418,7 +1443,7 @@ async function saveScheduleSettings() {
     SERVER_AVAILABLE = false;
     renderSchedulePage();
     populateMatchTimeSelects();
-    toast("Timings saved locally. A shared backend is needed to publish to all players.");
+    showAdminConfirmation("Timings saved on this device", "The three BR and CS slots were updated locally. A shared backend is needed to publish them to all players.");
   } catch (error) {
     toast(error.message || "Could not save schedule settings.", true);
   }
@@ -1437,7 +1462,7 @@ async function savePaymentSettings() {
       await refreshStateFromServer();
       await renderAdminTables();
       $$('[data-registration-form]').forEach(renderPaymentInstructions);
-      toast("Payment QR/UPI instructions published. UTR verification remains manual.");
+      showAdminConfirmation("Payment settings saved", "The BR and CS registration pages now use these payment settings. UTR/reference still needs manual verification before approval.");
       return;
     }
     const state = loadState();
@@ -1445,7 +1470,7 @@ async function savePaymentSettings() {
     saveState(state);
     SERVER_STATE = state;
     $$('[data-registration-form]').forEach(renderPaymentInstructions);
-    toast("Payment details saved locally. A shared backend is needed to publish to all players.");
+    showAdminConfirmation("Payment details saved on this device", "The QR/UPI details are stored locally. A shared backend is needed to publish them to all players.");
   } catch (error) {
     toast(error.message || "Could not save payment instructions.", true);
   }
@@ -1584,7 +1609,7 @@ async function saveRegistrationEdits(event) {
     await renderAdminTables();
     renderLeaderboards("#admin-br-preview", "br");
     renderLeaderboards("#admin-cs-preview", "cs");
-    toast("Entry name and roster updated.");
+    showAdminConfirmation("Registration updated", "The team/entry name and roster changes were saved, including emoji and symbol names.");
   } catch (error) {
     toast(error.message || "Could not save registration edits.", true);
   }
@@ -1605,7 +1630,7 @@ async function deleteRegistration(registrationId) {
     }
     await renderAdminTables();
     renderPage();
-    toast("Registration removed and slot released.");
+    showAdminConfirmation("Registration removed", "The registration was deleted and its reserved lobby slot is available again.");
   } catch (error) {
     toast(error.message || "Could not remove registration.", true);
   }
@@ -1667,7 +1692,7 @@ async function saveFinalScores() {
       await renderAdminTables();
       renderLeaderboards("#admin-br-preview", "br");
       renderLeaderboards("#admin-cs-preview", "cs");
-      toast("Match results saved. Points and public standings updated.");
+      showAdminConfirmation("Match results published", "BR match points, the latest scored match, cumulative standings, and CS results are now updated on the leaderboard.");
       return;
     }
     const state = loadState();
@@ -1696,7 +1721,7 @@ async function saveFinalScores() {
     saveState(state);
     ADMIN_REGISTRATIONS = state.registrations || [];
     await renderAdminTables();
-    toast("Match results saved locally. A shared backend is needed for public live standings.");
+    showAdminConfirmation("Match results saved on this device", "The points were calculated locally. A shared backend is needed to publish these results to all players.");
   } catch (error) {
     toast(error.message || "Could not save match results.", true);
   }
@@ -1709,7 +1734,7 @@ async function updateRegistrationStatus(registrationId, status) {
     await renderAdminTables();
     renderPage();
     const slotText = result.registration?.slotNumber ? ` Slot ${result.registration.slotNumber}/${result.registration.slotCapacity} assigned.` : "";
-    toast(`Registration marked ${status}.${slotText}`);
+    showAdminConfirmation(`Registration ${status.toLowerCase()}`, `The entry status was updated.${slotText}`);
     return;
   }
   const state = loadState();
@@ -1723,7 +1748,7 @@ async function updateRegistrationStatus(registrationId, status) {
   saveState(state);
   await renderAdminTables();
   renderPage();
-  toast(`Registration marked ${status} locally.`);
+  showAdminConfirmation(`Registration ${status.toLowerCase()} on this device`, "The change is local only. A shared backend is needed for players to see the approval status.");
 }
 
 function renderAdminSummaryCards(summary) {
@@ -1778,7 +1803,7 @@ async function clearRegistrations() {
     await refreshStateFromServer();
     renderAdminTables();
     renderPage();
-    toast("Live registrations cleared.");
+    showAdminConfirmation("Registrations cleared", "All registrations were removed from the shared server.");
     return;
   }
   const state = loadState();
@@ -1786,7 +1811,7 @@ async function clearRegistrations() {
   saveState(state);
   renderAdminTables();
   renderPage();
-  toast("Local registrations cleared.");
+  showAdminConfirmation("Registrations cleared on this device", "Local registrations were removed. A shared backend is needed for shared updates.");
 }
 
 
@@ -1820,7 +1845,7 @@ function importStateJson() {
     saveState(state);
     renderAdminTables();
     renderPage();
-    toast("State imported locally.");
+    showAdminConfirmation("Admin state imported", "The selected state was imported to this device.");
   } catch (error) {
     toast("Invalid JSON.", true);
   }
@@ -1835,7 +1860,7 @@ function resetAdminState() {
   saveState(state);
   renderAdminTables();
   renderPage();
-  toast("Admin state reset locally.");
+  showAdminConfirmation("Local admin state reset", "Room overrides, leaderboard entries, and notices were reset. Registrations were kept.");
 }
 
 function downloadFile(filename, content, type) {
