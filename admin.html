@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel | NIT Hamirpur Free Fire Tournament</title>
-  <meta name="description" content="Static admin panel for slots, leaderboard, registrations and export/import state." />
+  <meta name="description" content="Admin tools for timings, registration edits, QR payments, room details, and verified match results." />
   <link rel="stylesheet" href="styles.css?v=20261006-final-v6" />
 </head>
 <body data-page="admin" id="top">
@@ -33,7 +33,7 @@
     <div class="reveal">
       <span class="eyebrow">Admin controls</span>
       <h1 class="page-title">Control slots and <span>leaderboard updates</span>.</h1>
-      <p class="page-lead">Use this panel to approve teams, assign lobbies, enter final team scores, and publish room ID/password. In live server mode, your changes appear for everyone immediately. On static hosting, you still need a backend for true live updates.</p>
+      <p class="page-lead">Set separate BR/CS timings, approve and edit registrations, publish payment and room QR details, and enter verified match results. In live server mode, changes appear for everyone immediately; shared live updates require the backend.</p>
       <div class="action-row"><a class="btn small ghost" href="admin-dashboard.html">Open Live Dashboard</a><a class="btn small ghost" href="room-details.html">View Room Details Page</a></div>
     </div>
   </section>
@@ -52,6 +52,25 @@
   <section class="section hidden" id="admin-panel">
     <div class="stats-grid" id="admin-live-summary"></div>
     <div class="admin-grid">
+      <article class="admin-box full">
+        <h2>Set match timings (independent BR and CS schedules)</h2>
+        <p>Choose a start time, session duration, and gap between the three time-linked slots for each mode. Each BR slot contains 3 matches; each CS slot contains 1 match. Times are displayed in IST.</p>
+        <div class="schedule-settings-grid">
+          <fieldset class="schedule-setting"><legend>Battle Royale · 3 matches per slot</legend>
+            <label>Slot 1 start time<select id="br-start-time"></select></label>
+            <label>Slot duration<select id="br-duration"><option value="1">1 hour</option><option value="2">2 hours</option></select></label>
+            <label>Gap between slots<select id="br-gap"><option value="0">No gap</option><option value="1">1 hour</option><option value="2">2 hours</option></select></label>
+          </fieldset>
+          <fieldset class="schedule-setting"><legend>Clash Squad · 1 match per slot</legend>
+            <label>Slot 1 start time<select id="cs-start-time"></select></label>
+            <label>Slot duration<select id="cs-duration"><option value="1">1 hour</option><option value="2">2 hours</option></select></label>
+            <label>Gap between slots<select id="cs-gap"><option value="0">No gap</option><option value="1">1 hour</option><option value="2">2 hours</option></select></label>
+          </fieldset>
+        </div>
+        <p class="disclaimer" id="admin-schedule-preview"></p>
+        <div class="admin-actions"><button class="btn small" id="save-schedule-settings" type="button">Save BR & CS Timings</button></div>
+      </article>
+
       <article class="admin-box">
         <h2>Update room slots</h2>
         <p>Set confirmed/filled entries for any room. Battle Royale lobbies have up to 12 entries/teams (slots 1–12). Clash Squad rooms have 2 teams.</p>
@@ -81,10 +100,23 @@
         <label>Message<textarea id="custom-room-message" placeholder="Example: Join 10 minutes before start. Do not share room details outside registered players."></textarea></label>
         <label class="checkbox-line"><input type="checkbox" id="room-published" checked /> Publish on Room Details page</label>
         <label class="checkbox-line"><input type="checkbox" id="room-force-publish" /> Force release now even if room/lobby is not full</label>
+        <label>Optional room join QR<input id="room-qr-file" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+        <div id="room-qr-preview-wrap" class="qr-preview-wrap hidden"><img id="room-qr-preview" alt="Room QR preview" /><button class="btn small ghost" id="clear-room-qr" type="button">Remove QR</button></div>
         <div class="admin-actions"><button class="btn small" id="save-room-details" type="button">Publish Room Details</button></div>
       </article>
 
-
+      <article class="admin-box full">
+        <h2>Payment instructions for players</h2>
+        <p>Upload an optional payment QR and/or set a UPI ID. Players can use the QR or generated UPI link. The UTR/reference remains required, and payment still needs manual verification before approval.</p>
+        <div class="field-grid">
+          <label>Payee / account name<input id="payment-payee" maxlength="100" placeholder="Organizer / account name" /></label>
+          <label>UPI ID<input id="payment-upi-id" maxlength="120" placeholder="name@bank" /></label>
+        </div>
+        <label>Payment note<textarea id="payment-note" maxlength="500" placeholder="Optional payment instructions, exact fee reminder, or contact note"></textarea></label>
+        <label>Payment QR image<input id="payment-qr-file" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+        <div id="payment-qr-preview-wrap" class="qr-preview-wrap hidden"><img id="payment-qr-preview" alt="Payment QR preview" /><button class="btn small ghost" id="clear-payment-qr" type="button">Remove QR</button></div>
+        <div class="admin-actions"><button class="btn small" id="save-payment-settings" type="button">Publish Payment Instructions</button></div>
+      </article>
 
       <article class="admin-box full">
         <h2>Registrations & approvals</h2>
@@ -96,10 +128,10 @@
       </article>
 
       <article class="admin-box full">
-        <h2>Enter final scores for approved teams</h2>
-        <p>Approved teams appear here automatically with their slot and team name. After matches, enter each team’s final combined score and select <b>Save all scores</b>. Battle Royale scores cover all 3 matches in the selected time window; Clash Squad scores cover its 1 match.</p>
+        <h2>Enter verified match results</h2>
+        <p>For each approved BR entry, enter kills and placement position for each of the 3 matches. Points are calculated automatically from kills plus the placement table. For CS, select Win/Loss and enter round difference. Saving publishes last-match details and cumulative standings; BR final score is never typed manually.</p>
         <div id="final-score-table"></div>
-        <div class="admin-actions"><button class="btn small" id="save-final-scores" type="button">Save All Scores</button></div>
+        <div class="admin-actions"><button class="btn small" id="save-final-scores" type="button">Save Match Results</button></div>
       </article>
 
       <article class="admin-box full">
@@ -122,17 +154,30 @@
       <article class="admin-box full">
         <h2>How to control the website as admin</h2>
         <ol class="help-list">
-          <li><b>Change tournament text:</b> edit <code>data.js</code> for event name, WhatsApp, UPI, date, fee tiers and prize notes.</li>
-          <li><b>Approve entries:</b> review a registration and tap Approve or Reject. Each entry gets a reserved lobby slot from 1–12 when submitted.</li>
-          <li><b>Final scores:</b> approve entries, enter each final score in the team table, and tap Save All Scores. The public leaderboard updates live.</li>
-          <li><b>Publish room ID/password:</b> use the Room ID & Password box. Players can view it on <code>room-details.html</code> after release.</li>
-          <li><b>Make updates visible to everyone:</b> open GitHub on your phone, edit <code>data.js</code>, paste the exported values into <code>publishedState</code>, and commit. GitHub Pages updates in 1–3 minutes.</li>
-          <li><b>Collect real registrations centrally:</b> connect Google Sheets/Firebase/Supabase later. Static GitHub Pages alone cannot collect every player’s entry in one admin account automatically.</li>
+          <li><b>Set schedules:</b> select separate BR and CS start times, session lengths, and gaps. Three slots are retained for both modes; BR is 3 matches per slot and CS is 1.</li>
+          <li><b>Verify payments:</b> publish the payment QR and/or UPI ID above. Players submit their UTR/reference. QR/UPI is not an automatic payment gateway; manually verify the reference before approving.</li>
+          <li><b>Review registrations:</b> use Approve/Reject after checking the UTR. Edit names supports emoji and symbols; Remove deletes a registration and frees its reserved slot.</li>
+          <li><b>Enter results:</b> for BR, enter kills and placement for all three matches; the site calculates points from the placement table. For CS, choose Win/Loss and enter round difference. Save to publish cumulative standings and last-match details.</li>
+          <li><b>Publish room access:</b> enter the custom Room ID/password and optionally upload a room QR. Details remain hidden until full-room release or you force release.</li>
+          <li><b>Use a shared backend:</b> host <code>server.py</code> to share admin changes and registrations across visitors. Static GitHub Pages does not provide live shared storage by itself.</li>
         </ol>
       </article>
     </div>
   </section>
 </main>
+<dialog class="success-modal" id="edit-registration-modal">
+  <div class="modal-inner admin-edit-modal">
+    <button class="modal-close" id="edit-registration-close" type="button" aria-label="Close editor">×</button>
+    <span class="eyebrow">Admin editor</span>
+    <h2>Edit registration names</h2>
+    <p>Names support emoji and symbols. Player 1/IGL is required; uncheck a teammate to remove that player from the roster.</p>
+    <form id="edit-registration-form">
+      <label>Registration/team name<input id="edit-team-name" maxlength="80" required /></label>
+      <div id="edit-player-list" class="edit-player-list"></div>
+      <div class="modal-actions"><button class="btn small" type="submit">Save Name & Roster</button><button class="btn small ghost" id="edit-registration-cancel" type="button">Cancel</button></div>
+    </form>
+  </div>
+</dialog>
 <footer class="footer">
   <div>
     <strong data-event="name">NIT Hamirpur Free Fire Tournament</strong>

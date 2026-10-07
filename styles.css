@@ -506,3 +506,34 @@ td small { color: var(--muted); }
 .match-window-modes strong { color: #ffe0a0; }
 .score-input { min-width: 135px; }
 @media (max-width: 760px) { .match-window-modes { grid-template-columns: 1fr; } }
+
+/* Final 2.0 controls: independent schedules, QR payment, and match-by-match scoring */
+.schedule-mode-group { display: grid; gap: 14px; margin-bottom: 28px; }
+.schedule-mode-group > h3 { margin: 10px 0 0; color: #ffe0a0; }
+.schedule-setting { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 18px; }
+.schedule-setting legend { padding: 0 8px; color: var(--fire); font-weight: 900; }
+.schedule-setting label { display: grid; gap: 7px; }
+.payment-instructions { padding: 18px; border: 1px solid rgba(255,176,0,.3); border-radius: 18px; background: rgba(255,176,0,.06); }
+.payment-instructions h3 { margin: 0 0 10px; }
+.payment-instructions p { margin: 8px 0; }
+.payment-instructions-layout { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
+.payment-qr, .room-qr { display: block; width: min(100%, 230px); max-height: 260px; object-fit: contain; padding: 8px; border-radius: 14px; background: white; }
+.room-qr { margin-top: 14px; }
+.qr-preview-wrap { display: flex; align-items: center; gap: 14px; margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: 16px; }
+.qr-preview-wrap img { width: 180px; max-height: 180px; object-fit: contain; border-radius: 12px; background: white; padding: 6px; }
+.br-score-editor { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 10px; min-width: 580px; }
+.br-match-input { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 12px; }
+.br-match-input legend { padding: 0 5px; color: var(--fire); font-weight: 850; }
+.br-match-input label, .cs-score-editor label { display: grid; gap: 6px; }
+.br-match-input input, .br-match-input select { min-width: 0; width: 100%; padding: 10px; }
+.cs-score-editor { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(120px, .7fr); gap: 12px; min-width: 330px; }
+.edit-player-list { display: grid; gap: 12px; margin: 14px 0; }
+.edit-player-row { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; }
+.admin-edit-modal { max-height: 80vh; overflow: auto; }
+.admin-row-actions { min-width: 270px; }
+@media (max-width: 760px) {
+  .schedule-setting { grid-template-columns: 1fr; }
+  .payment-instructions-layout { align-items: flex-start; }
+  .cs-score-editor { grid-template-columns: 1fr; }
+  .admin-row-actions { min-width: 230px; }
+}

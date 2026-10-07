@@ -1,103 +1,33 @@
-# How to control and edit the website from your phone
+# Phone admin and deployment guide — Final 2.0
 
-## What is live now in this preview
+The admin panel works with the live Python backend. Default PIN: `2026`; set a private `TOURNAMENT_ADMIN_PIN` before deployment and do not share it. A static GitHub Pages copy alone cannot save shared registrations or admin changes.
 
-The preview uses `server.py`, so admin changes can go live immediately while the server is running:
+## Replace/deploy the update
 
-- player registrations
-- slot counts
-- leaderboard entries
-- room ID/password releases
-- admin dashboard totals
+1. Download and extract the **final 2.0 updates** ZIP.
+2. Replace the previous website files with the complete extracted set. Do not mix old `site.js`, `data.js`, `server.py`, or HTML files with the new ones.
+3. Deploy the folder to a Python-capable host (the included `render.yaml` is configured for Render). Use `python server.py` as the start command.
+4. Set `TOURNAMENT_ADMIN_PIN` to a private value. Enable persistent storage for `server-data.json` so registrations, settings and QR images survive restarts.
+5. Open `/admin.html`, enter the PIN, and test the controls before sharing the site.
 
-Admin PIN default: `2026`
+## Admin controls from your phone
 
-## Admin pages
+1. **Set match timings:** set BR and CS start times independently, choose a duration of 1 or 2 hours, and a 0/1/2-hour gap. There are exactly three linked time slots per mode. Each BR slot has 3 matches; each CS slot has 1 match. Time choices are shown in IST.
+2. **Publish payment details:** upload an optional payment QR and/or enter a payee name and UPI ID. Registrants will see the amount, instructions, QR, and a generated UPI link when available.
+3. **Verify and approve:** inspect the submitted UTR/reference manually and then approve or reject. There is no payment gateway or automatic payment verification; QR payment does not change the pending status by itself.
+4. **Correct names:** tap **Edit names** in the registration row. Update team/entry and player names (emoji and symbols are supported); uncheck a teammate to remove them. Use **Remove** to delete a whole registration and free its lobby slot.
+5. **Enter results:** approve entries first. For every BR team, enter kills and placement for each of its three matches; points calculate from `data.js` automatically. For CS, choose Win/Loss and enter round difference. Tap **Save Match Results** to publish match scores, last-match score and cumulative standings.
+6. **Release room access:** enter a custom room ID and password, optionally upload a room QR, then publish. The details remain hidden until the lobby is full unless you check Force release.
 
-- `admin.html` — approve registrations, enter final team scores, publish room details, and manage slots
-- `admin-dashboard.html` — see total registrations, total players, expected amount, and reported paid amount
-- `room-details.html` — public page where players see room ID/password after admin release
+## Current formats and fees
 
-## Important deployment note
+- Battle Royale: Solo, Duo, Trio and Squad; ₹20/₹40/₹60/₹80/₹100. Solo fee is per player; other BR fees are per team.
+- Clash Squad: Normal and One Tap; ₹50/₹70/₹90/₹110 per team.
+- Each BR room supports 12 entries/teams (slots 1–12); each CS room has two team places (slots 1–2).
+- There are three rooms per fee tier, one for each of the three schedule slots. There is no five-session/five-match display.
 
-If you host only on GitHub Pages, the website becomes static. Static GitHub Pages cannot save registrations or publish admin changes live by itself.
+## Backups and security
 
-For the same live admin behavior online, use one of these:
-
-1. Host `server.py` on a Python-supported host.
-2. Connect Google Sheets + Apps Script.
-3. Connect Firebase or Supabase.
-
-## GitHub Pages upload for static version
-
-1. Open GitHub in Chrome or install the GitHub app.
-2. Create a repository, for example `nith-free-fire-tournament`.
-3. Upload all files.
-4. Open **Settings → Pages**.
-5. Choose **Deploy from branch → main → root**.
-
-## Edit tournament details
-
-Open `data.js` and edit:
-
-```js
-event: {
-  name: "NIT Hamirpur Free Fire Tournament",
-  dateText: "Date and time to be announced",
-  supportChannel: "Official WhatsApp group/contact to be added",
-  whatsappNumber: "919876543210",
-  upiId: "yourupi@bank",
-  adminPin: "2026"
-}
-```
-
-## Battle Royale formats
-
-- Each Battle Royale lobby has up to 12 numbered entries/teams (slots 1–12).
-- Each lobby's BR session contains 3 matches in its selected one-hour window.
-
-Solo fee is per player. Duo, Trio and Squad fee is per team.
-
-## Clash Squad fees
-
-Clash Squad now starts directly from ₹50.
-
-Current Clash Squad tiers:
-
-- ₹50
-- ₹70
-- ₹90
-- ₹100
-
-## Safety tips
-
-- Do not share admin PIN publicly.
-- Share room ID/password only after the room is ready.
-- Keep payment and refund rules clear before accepting money.
-- Ask for screen recording proof when suspicious gameplay is reported.
-
-
-## Approval and slot status
-
-1. Player submits the registration, chooses a lobby and one of the three match time windows.
-2. The server reserves a slot number (1–12 for BR; Clash Squad uses its 2 team places) and shows it in the submission confirmation.
-3. The player opens `/status-check.html`, selects the same lobby and enters the slot number. No registration ID or WhatsApp is needed on this page.
-4. In `admin.html`, review the entry and press **Approve** or **Reject**. Approved entries appear on the public leaderboard automatically.
-
-## Enter final scores
-
-1. Unlock `admin.html` with the admin PIN.
-2. Approve the teams first so they appear in the score table.
-3. Find each team by **slot + team name** and enter its final combined score.
-4. Press **Save All Scores**. The public leaderboard updates automatically.
-5. BR score is the cumulative final score for all 3 matches in the assigned hour. CS score is the result score for its 1 match.
-
-## Match windows
-
-All times are IST; the event date will be announced separately.
-
-- Slot 1: 9:00–10:00 PM — BR plays 3 matches; CS plays 1 match.
-- Slot 2: 10:00–11:00 PM — BR plays 3 matches; CS plays 1 match.
-- Slot 3: 11:00 PM–12:00 AM — BR plays 3 matches; CS plays 1 match.
-
-The time-window selector is on both registration forms. The chosen time appears in admin and on the leaderboard.
+- Use the host’s persistent storage for `server-data.json`; it includes registrations, payment references, private room details and QR images.
+- Back up the data file securely and limit access to the PIN.
+- Keep the event described as student-organized. Do not imply NIT Hamirpur, Garena, or Free Fire approval or endorsement.

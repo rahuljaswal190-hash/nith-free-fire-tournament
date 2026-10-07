@@ -33,17 +33,17 @@
     <div class="reveal">
       <span class="eyebrow"><span class="pulse-dot"></span> Approval status</span>
       <h1 class="page-title">Check approval and <span>assigned slot</span>.</h1>
-      <p class="page-lead">Every entry receives a reserved slot number from 1 to 12 when it is submitted. Use the same lobby and slot number to see whether the organizer has approved it.</p>
+      <p class="page-lead">Every entry receives a reserved slot in its selected lobby. Battle Royale rooms use slots 1–12; Clash Squad rooms use slots 1–2. Use the same lobby and slot number to check approval.</p>
     </div>
   </section>
 
   <section class="section">
     <article class="form-card status-check-card">
       <h2>Check with your lobby and slot number</h2>
-      <p>Select the exact lobby shown in your registration confirmation, then enter your assigned slot number from 1 to 12.</p>
+      <p>Select the exact lobby shown in your registration confirmation. The slot-number range updates to match that lobby’s capacity.</p>
       <div class="field-grid">
         <label>Your lobby<select id="status-room" required></select></label>
-        <label>Slot number (1–12)<input id="status-slot" type="number" min="1" max="12" step="1" inputmode="numeric" placeholder="Enter your slot" required /></label>
+        <label id="status-slot-label">Slot number (1–12)<input id="status-slot" type="number" min="1" max="12" step="1" inputmode="numeric" placeholder="Enter your slot" required /></label>
       </div>
       <div class="admin-actions"><button class="btn small" id="check-slot-status" type="button">Check Approval Status</button></div>
     </article>
@@ -51,7 +51,7 @@
 
   <section class="section">
     <div class="section-head"><span class="eyebrow">Result</span><h2>Your status result</h2></div>
-    <div id="status-result"><div class="empty-state"><h3>No status checked yet</h3><p>Enter the same lobby you registered in and your slot number (1–12).</p></div></div>
+    <div id="status-result"><div class="empty-state"><h3>No status checked yet</h3><p>Select your exact room. The available slot range updates for BR (1–12) or CS (1–2).</p></div></div>
   </section>
 </main>
 

@@ -57,7 +57,7 @@
     <div class="form-grid">
       <div class="note-box">
         <h2>Battle Royale format</h2>
-        <p>Each lobby holds up to 12 entries/teams (slots 1–12). Three matches will be played within the selected one-hour time window. Top 3 entries/teams are selected by cumulative score: placement points + kill points - penalties.</p>
+        <p>Each lobby holds up to 12 entries/teams (slots 1–12). Three matches are played in its assigned time slot. Current IST timing appears beside each lobby and can be updated by the organizer. Top 3 entries/teams are selected by cumulative kills plus placement points.</p>
         <p>Room ID/password will be shared privately. Screenshots/recordings may be required for result verification.</p>
       </div>
       <form class="form-card" data-registration-form data-mode="br">
@@ -94,7 +94,8 @@
   <label>Player 4 Free Fire ID<input name="p4Uid" inputmode="numeric" placeholder="Numeric Free Fire ID" /></label>
 </div>
   </div>
-  <label>Payment UTR / Reference<input required name="paymentRef" placeholder="Enter UTR or write Pay after confirmation" /></label>
+  <div class="payment-instructions" data-payment-instructions aria-live="polite"></div>
+  <label>Payment UTR / Reference<input required name="paymentRef" placeholder="Enter UTR/reference, or write Pay after confirmation" /></label>
   <label class="checkbox-line"><input type="checkbox" name="acceptedRules" required /> I confirm my entry/team has read the rules, fair-play policy, payment/prize variation note, and room confirmation process.</label>
   <button class="btn full" type="submit">Submit Battle Royale Registration</button>
 </form>

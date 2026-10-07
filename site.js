@@ -7,6 +7,10 @@ let SERVER_STATE = null;
 let currentAdminPin = "";
 let liveSyncTimer = null;
 let ADMIN_REGISTRATIONS = [];
+let ADMIN_SUMMARY = null;
+let PAYMENT_QR_DATA = "";
+let ROOM_QR_DATA = "";
+let EDITING_REGISTRATION_ID = "";
 let lastStatusSearch = null;
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
@@ -20,6 +24,8 @@ function defaultState() {
     approvedTeams: [],
     leaderboard: { br: [], cs: [] },
     notices: [],
+    paymentSettings: { payeeName: "", upiId: "", note: "", qrDataUrl: "" },
+    scheduleWindows: DATA.matchWindows || { br: [], cs: [] },
     updatedAt: new Date().toISOString()
   };
 }
@@ -39,7 +45,9 @@ function normalizeState(raw = {}) {
       br: Array.isArray(raw.leaderboard?.br) ? raw.leaderboard.br : [],
       cs: Array.isArray(raw.leaderboard?.cs) ? raw.leaderboard.cs : []
     },
-    notices: Array.isArray(raw.notices) ? raw.notices : []
+    notices: Array.isArray(raw.notices) ? raw.notices : [],
+    paymentSettings: raw.paymentSettings && typeof raw.paymentSettings === "object" ? raw.paymentSettings : { payeeName: "", upiId: "", note: "", qrDataUrl: "" },
+    scheduleWindows: raw.scheduleWindows && typeof raw.scheduleWindows === "object" ? raw.scheduleWindows : (DATA.matchWindows || { br: [], cs: [] })
   };
 }
 
@@ -106,6 +114,22 @@ function getFeeTiers(mode) {
 
 function getRoom(roomId) {
   return DATA.rooms.find((room) => room.id === roomId);
+}
+
+function getScheduleWindows(mode) {
+  const state = loadState();
+  const windows = state.scheduleWindows || DATA.matchWindows || {};
+  return Array.isArray(windows[mode]) ? windows[mode] : [];
+}
+
+function getScheduleWindow(mode, slotId) {
+  const slots = getScheduleWindows(mode);
+  return slots.find((slot) => slot.id === slotId) || slots[0] || { id: "slot1", label: "Slot 1", time: "To be announced", matches: mode === "br" ? 3 : 1 };
+}
+
+function roomScheduleWindow(room) {
+  if (!room) return null;
+  return getScheduleWindow(room.mode, room.scheduleSlot || "slot1");
 }
 
 function localRegistrationsForRoom(roomId) {
@@ -353,6 +377,7 @@ function renderClashPage() {
   if (variantFilter && !variantFilter.value) variantFilter.value = "Normal";
 
   const formVariant = $("#cs-form-variant");
+  const csForm = $('[data-registration-form][data-mode="cs"]');
 
   const rerender = () => {
     const fee = Number(tierFilter?.value || defaultFee);
@@ -361,6 +386,7 @@ function renderClashPage() {
     renderRoomCards("#cs-room-grid", getRooms({ mode: "cs", fee, variant }));
     populateRoomSelect("#cs-room-select", getRooms({ mode: "cs", fee, variant }));
     renderModeStats("#cs-stats", getRooms({ mode: "cs", fee, variant }));
+    syncRegistrationSchedule(csForm, "room");
     const prize = $("#cs-prize-note");
     if (prize) prize.textContent = `${variant} Clash Squad ${formatFee(fee)} room: ${DATA.economics.csPrizeNote} Current full-room entry pool is ${formatFee(csProjectedPrize(fee))}.`;
   };
@@ -400,7 +426,7 @@ function renderBattlePage() {
     const roomSelect = $("#br-room-select");
     const brForm = $('[data-registration-form][data-mode="br"]');
     if (roomSelect) roomSelect.onchange = () => updateDynamicRoster(brForm);
-    updateDynamicRoster(brForm);
+    syncRegistrationSchedule(brForm, "room");
   };
 
   tierFilter?.addEventListener("change", rerender);
@@ -465,12 +491,16 @@ function populateFeeSelect(select, selectedFee, mode = "br") {
 function populateRoomSelect(selector, rooms) {
   const select = $(selector);
   if (!select) return;
+  const previous = select.value;
   select.innerHTML = rooms.map((room) => {
     const left = slotsLeft(room);
     const status = roomStatus(room);
     const label = entryLabel(room);
-    return `<option value="${room.id}" ${left <= 0 ? "disabled" : ""}>${room.title} — ${left}/${room.capacity} ${label} left (${status.label})</option>`;
+    const window = roomScheduleWindow(room);
+    return `<option value="${escapeHtml(room.id)}" ${left <= 0 ? "disabled" : ""}>${escapeHtml(room.title)} · ${escapeHtml(window?.label || "Slot")} ${escapeHtml(window?.time || "")} IST — ${left}/${room.capacity} ${label} left (${status.label})</option>`;
   }).join("");
+  const preferred = rooms.find((room) => room.id === previous && slotsLeft(room) > 0) || rooms.find((room) => slotsLeft(room) > 0) || rooms[0];
+  if (preferred) select.value = preferred.id;
 }
 
 function renderRoomCards(selector, rooms) {
@@ -484,6 +514,7 @@ function renderRoomCards(selector, rooms) {
     const modeLabel = room.mode === "br" ? `${room.formatLabel || "Battle Royale"} Battle Royale` : `${room.variant} Clash Squad`;
     const prizeText = room.mode === "br" ? `Target reward ${formatFee(brProjectedPrize(room.fee))}` : `Entry pool ${formatFee(csProjectedPrize(room.fee))}+`;
     const label = entryLabel(room);
+    const window = roomScheduleWindow(room);
     return `
       <article class="room-card ${status.className}">
         <div class="room-card-head">
@@ -491,7 +522,8 @@ function renderRoomCards(selector, rooms) {
           <b>${formatFee(room.fee)} ${feeRuleLabel(room)}</b>
         </div>
         <h3>${escapeHtml(room.title)}</h3>
-        <p>${modeLabel} · ${room.matchCount} ${room.matchCount > 1 ? "matches" : "match"} · ${escapeHtml(room.rewardRule)}</p>
+        <p>${escapeHtml(modeLabel)} · ${room.matchCount} ${room.matchCount > 1 ? "matches" : "match"} · ${escapeHtml(room.rewardRule)}</p>
+        <p class="disclaimer"><b>${escapeHtml(window?.label || "Time slot")}:</b> ${escapeHtml(window?.time || "To be announced")} IST</p>
         <div class="slot-line"><span>${confirmed}/${room.capacity} ${label} reserved/confirmed</span><strong>${left} left</strong></div>
         <div class="progress"><i style="width:${percent}%"></i></div>
         <div class="room-meta">
@@ -504,12 +536,70 @@ function renderRoomCards(selector, rooms) {
 }
 
 
+function renderPaymentInstructions(form) {
+  const box = form?.querySelector("[data-payment-instructions]");
+  if (!box) return;
+  const settings = loadState().paymentSettings || {};
+  const room = getRoom(form.elements.roomId?.value || form.querySelector('[name="roomId"]')?.value);
+  const fee = Number(room?.fee || 0);
+  const upiId = clean(settings.upiId);
+  const payee = clean(settings.payeeName);
+  const note = clean(settings.note);
+  let upiLink = "";
+  if (upiId) {
+    const params = new URLSearchParams({ pa: upiId, pn: payee || "Tournament Organizer", am: fee.toFixed(2), cu: "INR", tn: "Free Fire Tournament Entry" });
+    upiLink = `upi://pay?${params.toString()}`;
+  }
+  const qr = settings.qrDataUrl ? `<img class="payment-qr" src="${escapeHtml(settings.qrDataUrl)}" alt="Tournament payment QR code" />` : "";
+  const payLink = upiLink ? `<a class="btn small" href="${escapeHtml(upiLink)}">Pay ${formatFee(fee)} with UPI</a>` : "";
+  const payeeLine = payee ? `<p><b>Payee:</b> ${escapeHtml(payee)}</p>` : "";
+  const upiLine = upiId ? `<p><b>UPI ID:</b> <code>${escapeHtml(upiId)}</code></p>` : "";
+  const noteLine = note ? `<p>${escapeHtml(note)}</p>` : "";
+  const published = qr || upiLine || payeeLine || noteLine;
+  box.innerHTML = `<h3>Payment instructions</h3>${published ? `<div class="payment-instructions-layout">${qr}<div>${payeeLine}${upiLine}<p><b>Entry fee:</b> ${formatFee(fee)} · ${escapeHtml(room ? feeRuleLabel(room) : "per entry")}</p>${payLink}${noteLine}</div></div>` : `<p>Payment instructions have not been published yet. Ask the student organizers before paying.</p>`}<p class="disclaimer">Payment is not automatically verified. Enter the UTR/reference below; registration remains pending until the organizer checks it and approves your entry.</p>`;
+}
+
+function syncRegistrationSchedule(form, source = "room") {
+  if (!form) return;
+  const mode = form.dataset.mode === "cs" ? "cs" : "br";
+  const roomSelect = form.elements.roomId || form.querySelector('[name="roomId"]');
+  const timeSelect = form.querySelector("[data-match-time]");
+  if (!roomSelect || !timeSelect) return;
+  const slots = getScheduleWindows(mode);
+  const currentRoom = getRoom(roomSelect.value);
+  const currentSlot = source === "time" ? timeSelect.value : (currentRoom?.scheduleSlot || slots[0]?.id || "slot1");
+  const roomOptionForSlot = (slotId) => Array.from(roomSelect.options).find((option) => getRoom(option.value)?.scheduleSlot === slotId);
+  timeSelect.innerHTML = slots.map((item) => {
+    const roomOption = roomOptionForSlot(item.id);
+    const unavailable = !roomOption || roomOption.disabled;
+    return `<option value="${escapeHtml(item.id)}" ${unavailable ? "disabled" : ""}>${escapeHtml(item.label)} · ${escapeHtml(item.time)} IST · ${item.matches || (mode === "br" ? 3 : 1)} ${mode === "br" ? "matches" : "match"}${unavailable ? " · Lobby full" : ""}</option>`;
+  }).join("");
+  const selectedSlot = slots.some((item) => item.id === currentSlot) ? currentSlot : (slots[0]?.id || "slot1");
+  timeSelect.value = selectedSlot;
+  if (source === "time") {
+    const matchingOption = Array.from(roomSelect.options).find((option) => getRoom(option.value)?.scheduleSlot === selectedSlot && !option.disabled);
+    if (matchingOption) roomSelect.value = matchingOption.value;
+  } else if (!currentRoom || currentRoom.scheduleSlot !== selectedSlot) {
+    const matchingOption = Array.from(roomSelect.options).find((option) => getRoom(option.value)?.scheduleSlot === selectedSlot && !option.disabled);
+    if (matchingOption) roomSelect.value = matchingOption.value;
+  }
+  updateDynamicRoster(form);
+  renderPaymentInstructions(form);
+}
+
 function populateMatchTimeSelects() {
-  const slots = DATA.matchWindows || [];
-  $$('[data-match-time]').forEach((select) => {
-    const current = select.value;
-    select.innerHTML = slots.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)} — ${escapeHtml(item.time)} IST</option>`).join("");
-    select.value = slots.some((item) => item.id === current) ? current : (slots[0]?.id || "slot1");
+  $$('[data-registration-form]').forEach((form) => {
+    const timeSelect = form.querySelector("[data-match-time]");
+    const roomSelect = form.elements.roomId || form.querySelector('[name="roomId"]');
+    if (timeSelect && timeSelect.dataset.scheduleBound !== "true") {
+      timeSelect.addEventListener("change", () => syncRegistrationSchedule(form, "time"));
+      timeSelect.dataset.scheduleBound = "true";
+    }
+    if (roomSelect && roomSelect.dataset.scheduleBound !== "true") {
+      roomSelect.addEventListener("change", () => syncRegistrationSchedule(form, "room"));
+      roomSelect.dataset.scheduleBound = "true";
+    }
+    syncRegistrationSchedule(form, "room");
   });
 }
 
@@ -578,8 +668,8 @@ function readRegistrationForm(form, mode) {
   const room = getRoom(roomId);
   const now = new Date();
   const requiredPlayers = mode === "br" ? Number(room?.playersPerEntry || 1) : 4;
-  const scheduleSlot = clean(fd.get("scheduleSlot")) || "slot1";
-  const scheduleWindow = (DATA.matchWindows || []).find((item) => item.id === scheduleSlot) || (DATA.matchWindows || [])[0] || {};
+  const scheduleSlot = room?.scheduleSlot || clean(fd.get("scheduleSlot")) || "slot1";
+  const scheduleWindow = getScheduleWindow(mode, scheduleSlot);
   const iglName = clean(fd.get("iglName")) || clean(fd.get("p1Ign"));
   const iglUid = clean(fd.get("iglUid")) || clean(fd.get("p1Uid"));
   const players = [{ ign: iglName, uid: iglUid }];
@@ -711,13 +801,6 @@ function renderLeaderboardPage() {
   renderLeaderboards("#cs-leaderboard", "cs");
 }
 
-function getLeaderboard(mode) {
-  const state = loadState();
-  const pub = published().leaderboard?.[mode] || [];
-  const local = state.leaderboard?.[mode] || [];
-  return [...pub, ...local];
-}
-
 function getApprovedTeamRows(mode) {
   const state = loadState();
   let teams = Array.isArray(state.approvedTeams) ? state.approvedTeams : [];
@@ -737,73 +820,79 @@ function getApprovedTeamRows(mode) {
       scheduleSlotLabel: reg.scheduleSlotLabel,
       scheduleTime: reg.scheduleTime,
       players: (reg.players || []).map((player) => player.ign).filter(Boolean),
+      brMatches: reg.brMatches || [],
+      csResult: reg.csResult || null,
+      lastMatchScore: reg.brMatches?.slice().reverse().find((match) => match && match.score !== null && match.score !== undefined)?.score ?? null,
+      csRoundDiff: reg.csResult?.roundDiff ?? null,
       finalScore: reg.finalScore
     }));
   }
   return teams.filter((row) => row.mode === mode || (mode === "br" && row.modeLabel === "Battle Royale") || (mode === "cs" && row.modeLabel === "Clash Squad"));
 }
 
-function brTotal(row) {
-  return Number(row.placementPoints || 0) + Number(row.kills || 0) * DATA.scoring.br.killPoint - Number(row.penalty || 0);
-}
-
-function csTotal(row) {
-  return Number(row.wins || 0) * DATA.scoring.cs.winPoint + Number(row.draws || 0) - Number(row.penalty || 0);
-}
-
 function renderLeaderboards(selector, mode) {
   const container = $(selector);
   if (!container) return;
-  const autoRows = getApprovedTeamRows(mode);
-  const usedKeys = new Set(autoRows.map((row) => `${String(row.teamName || "").toLowerCase()}|${String(row.roomId || "").toLowerCase()}`));
-  const legacyRows = getLeaderboard(mode).filter((row) => !usedKeys.has(`${String(row.teamName || "").toLowerCase()}|${String(row.roomId || "").toLowerCase()}`)).map((row) => ({
-    ...row,
-    slotNumber: row.slotNumber || null,
-    roomTitle: row.roomTitle || row.roomId || "-",
-    players: Array.isArray(row.players) ? row.players : [],
-    finalScore: row.finalScore !== undefined && row.finalScore !== null ? Number(row.finalScore) : (mode === "br" ? brTotal(row) : csTotal(row)),
-    isLegacy: true
-  }));
-  const rows = [...autoRows, ...legacyRows].map((row) => ({
+  const rows = getApprovedTeamRows(mode).map((row) => ({
     ...row,
     _score: row.finalScore === null || row.finalScore === undefined || row.finalScore === "" ? null : Number(row.finalScore)
   })).sort((a, b) => {
     if (a._score === null && b._score !== null) return 1;
     if (a._score !== null && b._score === null) return -1;
     if (a._score !== null && b._score !== null && a._score !== b._score) return b._score - a._score;
+    if (mode === "cs" && Number(a.csRoundDiff || a.csResult?.roundDiff || 0) !== Number(b.csRoundDiff || b.csResult?.roundDiff || 0)) {
+      return Number(b.csRoundDiff || b.csResult?.roundDiff || 0) - Number(a.csRoundDiff || a.csResult?.roundDiff || 0);
+    }
     return Number(a.slotNumber || 999) - Number(b.slotNumber || 999) || String(a.teamName || "").localeCompare(String(b.teamName || ""));
   });
 
   if (!rows.length) {
-    container.innerHTML = `<div class="empty-state"><h3>No approved ${mode === "br" ? "Battle Royale" : "Clash Squad"} teams yet</h3><p>Once the organizer approves a registration, its slot and team name will appear here automatically. Final score is added after the match.</p></div>`;
+    container.innerHTML = `<div class="empty-state"><h3>No approved ${mode === "br" ? "Battle Royale" : "Clash Squad"} teams yet</h3><p>Once the organizer approves a registration, its slot and team name will appear here automatically. Match results are published after organizer verification.</p></div>`;
     return;
   }
   let rank = 0;
-  let previousScore = null;
+  let previousRankKey = null;
   const tableRows = rows.map((row, index) => {
     if (row._score !== null) {
-      if (previousScore === null || row._score !== previousScore) rank = index + 1;
-      previousScore = row._score;
+      const roundDiff = Number(row.csRoundDiff || row.csResult?.roundDiff || 0);
+      const rankKey = mode === "cs" ? `${row._score}|${roundDiff}` : String(row._score);
+      if (previousRankKey !== rankKey) rank = index + 1;
+      previousRankKey = rankKey;
     }
     const displayedRank = row._score === null ? "—" : rank;
     const format = mode === "br" ? (row.formatLabel || row.format || "Battle Royale") : (row.variant || "Clash Squad");
     const roster = (row.players || []).filter(Boolean).join(", ") || "Roster submitted";
-    const score = row._score === null ? "Awaiting score" : row._score;
-    return `<tr class="${row._score !== null && rank <= 3 ? "top-row" : ""}">
-      <td>${displayedRank}</td>
+    const cumulative = row._score === null ? "Awaiting score" : row._score;
+    const common = `<td>${displayedRank}</td>
       <td><b>${row.slotNumber ? `#${escapeHtml(row.slotNumber)}/${escapeHtml(row.slotCapacity || 12)}` : "—"}</b></td>
       <td><strong>${escapeHtml(row.teamName || "-")}</strong><br><small>${escapeHtml(roster)}</small></td>
       <td>${escapeHtml(format)}</td>
       <td>${row.fee ? formatFee(row.fee) : "—"}</td>
       <td>${escapeHtml(row.scheduleTime || row.scheduleSlotLabel || "—")}</td>
-      <td>${escapeHtml(row.roomTitle || "-")}<br><small>${escapeHtml(row.roomId || "")}</small></td>
-      <td><b>${escapeHtml(score)}</b></td>
-    </tr>`;
+      <td>${escapeHtml(row.roomTitle || "-")}<br><small>${escapeHtml(row.roomId || "")}</small></td>`;
+    if (mode === "br") {
+      const matchCells = [0, 1, 2].map((matchIndex) => {
+        const match = row.brMatches?.[matchIndex];
+        if (!match || match.score === null || match.score === undefined) return `<td>—</td>`;
+        return `<td><b>${escapeHtml(match.score)}</b><br><small>${escapeHtml(match.kills)} kills · #${escapeHtml(match.position)}</small></td>`;
+      }).join("");
+      const lastScore = row.lastMatchScore === null || row.lastMatchScore === undefined ? "—" : row.lastMatchScore;
+      return `<tr class="${row._score !== null && rank <= 3 ? "top-row" : ""}">${common}${matchCells}<td><b>${escapeHtml(lastScore)}</b></td><td><b>${escapeHtml(cumulative)}</b></td></tr>`;
+    }
+    const result = row.csResult || {};
+    const outcome = result.outcome || (row.wins ? "Win" : row.losses ? "Loss" : "—");
+    const roundDiff = row.csRoundDiff ?? result.roundDiff ?? row.roundDiff ?? "—";
+    return `<tr class="${row._score !== null && rank <= 3 ? "top-row" : ""}">${common}<td>${escapeHtml(outcome)}</td><td>${escapeHtml(roundDiff)}</td><td><b>${escapeHtml(cumulative)}</b></td></tr>`;
   }).join("");
   const modeTitle = mode === "br" ? "Battle Royale" : "Clash Squad";
-  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Slot</th><th>Team / Entry & roster</th><th>Format / Type</th><th>Fee</th><th>Match time</th><th>Lobby / room ID</th><th>Final score</th></tr></thead><tbody>${tableRows}</tbody></table></div><p class="disclaimer">${modeTitle} standings update when entries are approved and when the organizer saves final scores.</p>`;
+  const headers = mode === "br"
+    ? `<th>Rank</th><th>Slot</th><th>Team / Entry & roster</th><th>Format</th><th>Fee</th><th>Match time</th><th>Lobby</th><th>Match 1</th><th>Match 2</th><th>Match 3</th><th>Last match</th><th>Cumulative</th>`
+    : `<th>Rank</th><th>Slot</th><th>Team & roster</th><th>Type</th><th>Fee</th><th>Match time</th><th>Room</th><th>Result</th><th>Round diff</th><th>Points</th>`;
+  const note = mode === "br"
+    ? "Each BR match score is kills plus the published placement points. Cumulative standings add the scored matches; last-match score is shown separately."
+    : "Clash Squad points are 3 for a win and 0 for a loss; round difference is used as a tiebreaker.";
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${tableRows}</tbody></table></div><p class="disclaimer">${modeTitle} standings update when entries are approved and when the organizer saves verified match results. ${note}</p>`;
 }
-
 
 function renderRoomDetailsPage() {
   const container = $("#room-details-grid");
@@ -824,7 +913,7 @@ function renderRoomDetailsPage() {
         <div class="room-card-head"><span class="status-pill ${canShow ? "open" : "few"}">${canShow ? "Released" : "Waiting for full room"}</span><b>${escapeHtml(detail.roomId)}</b></div>
         <h3>${escapeHtml(room?.title || detail.roomId)}</h3>
         <p>${canShow ? "Use these details to join the custom room." : "Admin has prepared the room details. They will be visible once the room/lobby is complete or admin forces release."}</p>
-        ${canShow ? `<div class="note-box"><p><b>Room ID:</b> ${escapeHtml(detail.customRoomId)}</p><p><b>Password:</b> ${escapeHtml(detail.password)}</p><p>${escapeHtml(detail.message || "Join on time and do not share details outside registered players.")}</p></div>` : ""}
+        ${canShow ? `<div class="note-box"><p><b>Room ID:</b> ${escapeHtml(detail.customRoomId)}</p><p><b>Password:</b> ${escapeHtml(detail.password)}</p><p>${escapeHtml(detail.message || "Join on time and do not share details outside registered players.")}</p>${detail.roomQrDataUrl ? `<img class="room-qr" src="${escapeHtml(detail.roomQrDataUrl)}" alt="Optional room join QR code" />` : ""}</div>` : ""}
         <div class="room-meta"><span>${room ? `${getConfirmedTeams(room)}/${room.capacity} ${entryLabel(room)} confirmed` : "Room status unavailable"}</span><span>Updated ${new Date(detail.updatedAt || Date.now()).toLocaleString("en-IN")}</span></div>
       </article>
     `;
@@ -867,6 +956,12 @@ function slotLabel(reg) {
 
 function setupStatusPage() {
   populateStatusRoomSelect();
+  updateStatusSlotLimit();
+  const select = $("#status-room");
+  if (select && select.dataset.bound !== "true") {
+    select.addEventListener("change", updateStatusSlotLimit);
+    select.dataset.bound = "true";
+  }
   const button = $("#check-slot-status");
   if (button && button.dataset.bound !== "true") {
     button.addEventListener("click", checkStatusBySlot);
@@ -878,15 +973,32 @@ function populateStatusRoomSelect() {
   const select = $("#status-room");
   if (!select) return;
   const current = select.value;
-  select.innerHTML = `<option value="">Select your exact lobby</option>` + DATA.rooms.map((room) => `<option value="${escapeHtml(room.id)}">${escapeHtml(room.title)} · ${escapeHtml(room.id)}</option>`).join("");
+  select.innerHTML = `<option value="">Select your exact lobby</option>` + DATA.rooms.map((room) => {
+    const window = roomScheduleWindow(room);
+    return `<option value="${escapeHtml(room.id)}">${escapeHtml(room.title)} · ${escapeHtml(window?.label || "Slot")} ${escapeHtml(window?.time || "")} IST · ${room.matchCount} ${room.matchCount > 1 ? "matches" : "match"}</option>`;
+  }).join("");
   if (DATA.rooms.some((room) => room.id === current)) select.value = current;
+}
+
+function updateStatusSlotLimit() {
+  const room = getRoom($("#status-room")?.value);
+  const capacity = Number(room?.capacity || 12);
+  const input = $("#status-slot");
+  const label = $("#status-slot-label");
+  if (input) {
+    input.max = String(capacity);
+    input.placeholder = `Enter 1–${capacity}`;
+    if (Number(input.value) > capacity) input.value = "";
+  }
+  if (label) label.firstChild.textContent = `Slot number (1–${capacity})`;
 }
 
 async function checkStatusBySlot() {
   const roomId = $("#status-room")?.value;
   const slotNumber = Number(clean($("#status-slot")?.value));
+  const capacity = Number(getRoom(roomId)?.capacity || 12);
   if (!roomId) return toast("Select the same lobby you chose when registering.", true);
-  if (!Number.isInteger(slotNumber) || slotNumber < 1 || slotNumber > 12) return toast("Enter a slot number from 1 to 12.", true);
+  if (!Number.isInteger(slotNumber) || slotNumber < 1 || slotNumber > capacity) return toast(`Enter a slot number from 1 to ${capacity}.`, true);
   try {
     let result;
     lastStatusSearch = { roomId, slotNumber };
@@ -927,7 +1039,7 @@ function renderStatusResult(result) {
   const statusKey = status.toLowerCase();
   const cls = statusKey === "approved" ? "open" : statusKey === "rejected" ? "closed" : "few";
   const slotText = result.slotNumber ? `Slot ${result.slotNumber}/${result.slotCapacity || 12}` : "Slot not assigned";
-  const statusMessage = statusKey === "approved" ? "Your entry is approved. Join only through the official Room Details page when the organizer releases the room." : statusKey === "rejected" ? "Your entry was not approved. Contact the organizer if you think this is a mistake." : "Your entry is pending. The organizer has not approved it yet.";
+  const statusMessage = statusKey === "approved" ? "Your entry is approved. Join only through the Room Details page when the organizer releases the room." : statusKey === "rejected" ? "Your entry was not approved. Contact the organizer if you think this is a mistake." : "Your entry is pending. The organizer has not approved it yet.";
   box.innerHTML = `
     <article class="room-card ${cls}">
       <div class="room-card-head"><span class="status-pill ${cls}">${escapeHtml(status)}</span><b>${escapeHtml(slotText)}</b></div>
@@ -942,17 +1054,18 @@ function renderStatusResult(result) {
 function renderSchedulePage() {
   const windows = $("#match-windows");
   if (windows) {
-    windows.innerHTML = (DATA.matchWindows || []).map((item, index) => `
-      <article class="timeline-card match-window-card">
-        <span>${String(index + 1).padStart(2, "0")}</span>
-        <div><b>${escapeHtml(item.label)} · ${escapeHtml(item.time)} IST</b>
-          <div class="match-window-modes">
-            <p><strong>Battle Royale:</strong> 3 matches played within this one-hour window.</p>
-            <p><strong>Clash Squad:</strong> 1 match played within this one-hour window.</p>
+    windows.innerHTML = ["br", "cs"].map((mode) => {
+      const title = mode === "br" ? "Battle Royale" : "Clash Squad";
+      const slotWindows = getScheduleWindows(mode);
+      const matches = mode === "br" ? 3 : 1;
+      return `<section class="schedule-mode-group"><h3>${title} · ${slotWindows.length} available time slots</h3>${slotWindows.map((item, index) => `
+        <article class="timeline-card match-window-card">
+          <span>${String(index + 1).padStart(2, "0")}</span>
+          <div><b>${escapeHtml(item.label)} · ${escapeHtml(item.time)} IST</b>
+            <div class="match-window-modes"><p><strong>${matches} match${matches > 1 ? "es" : ""}</strong> in this assigned session.</p></div>
           </div>
-        </div>
-      </article>
-    `).join("");
+        </article>`).join("")}</section>`;
+    }).join("");
   }
   const container = $("#schedule-list");
   if (!container) return;
@@ -964,6 +1077,84 @@ function renderSchedulePage() {
   `).join("");
 }
 
+
+function formatClockForAdmin(hour, minute) {
+  const suffix = hour < 12 ? "AM" : "PM";
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
+}
+
+function populateAdminTimeSelect(select, selectedValue) {
+  if (!select) return;
+  if (!select.options.length) {
+    const options = [];
+    for (let minutes = 0; minutes < 1440; minutes += 30) {
+      const hour = Math.floor(minutes / 60);
+      const minute = minutes % 60;
+      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      options.push(`<option value="${value}">${formatClockForAdmin(hour, minute)}</option>`);
+    }
+    select.innerHTML = options.join("");
+  }
+  if (Array.from(select.options).some((option) => option.value === selectedValue)) select.value = selectedValue;
+}
+
+function adminScheduleSettingsFromControls() {
+  return {
+    br: { startTime: $("#br-start-time")?.value || "21:00", durationHours: Number($("#br-duration")?.value || 1), gapHours: Number($("#br-gap")?.value || 0) },
+    cs: { startTime: $("#cs-start-time")?.value || "21:00", durationHours: Number($("#cs-duration")?.value || 1), gapHours: Number($("#cs-gap")?.value || 0) }
+  };
+}
+
+function previewAdminWindows(mode, settings) {
+  const [hour, minute] = (settings[mode].startTime || "21:00").split(":").map(Number);
+  const duration = Number(settings[mode].durationHours || 1);
+  const gap = Number(settings[mode].gapHours || 0);
+  const windows = [];
+  for (let index = 0; index < 3; index += 1) {
+    const start = hour * 60 + minute + index * (duration + gap) * 60;
+    const end = start + duration * 60;
+    const format = (value) => {
+      const day = Math.floor(value / 1440);
+      const minuteOfDay = value % 1440;
+      const h = Math.floor(minuteOfDay / 60);
+      const m = minuteOfDay % 60;
+      return { label: formatClockForAdmin(h, m), day };
+    };
+    const from = format(start);
+    const to = format(end);
+    const daySuffix = from.day > 0 ? " (+1 day)" : to.day > from.day ? (end % 1440 === 0 ? " (midnight)" : " (+1 day)") : "";
+    windows.push(`Slot ${index + 1}: ${from.label}–${to.label}${daySuffix}`);
+  }
+  return windows;
+}
+
+function updateAdminSchedulePreview() {
+  const preview = $("#admin-schedule-preview");
+  if (!preview) return;
+  const settings = adminScheduleSettingsFromControls();
+  preview.innerHTML = `<b>BR:</b> ${previewAdminWindows("br", settings).map(escapeHtml).join(" · ")} <br><b>CS:</b> ${previewAdminWindows("cs", settings).map(escapeHtml).join(" · ")}`;
+}
+
+function populateAdminSettingsFromSummary(summary = {}) {
+  const settings = summary.scheduleSettings || { br: { startTime: "21:00", durationHours: 1, gapHours: 0 }, cs: { startTime: "21:00", durationHours: 1, gapHours: 0 } };
+  ["br", "cs"].forEach((mode) => {
+    const conf = settings[mode] || {};
+    populateAdminTimeSelect($(mode === "br" ? "#br-start-time" : "#cs-start-time"), conf.startTime || "21:00");
+    const duration = $(mode === "br" ? "#br-duration" : "#cs-duration");
+    const gap = $(mode === "br" ? "#br-gap" : "#cs-gap");
+    if (duration) duration.value = String(conf.durationHours || 1);
+    if (gap) gap.value = String(conf.gapHours ?? 0);
+  });
+  const payment = summary.paymentSettings || {};
+  if ($("#payment-payee")) $("#payment-payee").value = payment.payeeName || "";
+  if ($("#payment-upi-id")) $("#payment-upi-id").value = payment.upiId || "";
+  if ($("#payment-note")) $("#payment-note").value = payment.note || "";
+  PAYMENT_QR_DATA = payment.qrDataUrl || "";
+  setQrPreview("payment", PAYMENT_QR_DATA);
+  updateAdminSchedulePreview();
+  loadRoomDetailAdminFields();
+}
 
 function setupAdminPage() {
   const unlock = $("#admin-unlock");
@@ -1006,10 +1197,7 @@ function setupAdminListeners() {
   $("#admin-format")?.addEventListener("change", updateAdminRoomChoices);
   $("#admin-variant")?.addEventListener("change", updateAdminRoomChoices);
   $("#save-room-count")?.addEventListener("click", saveAdminRoomCount);
-  $("#save-leaderboard")?.addEventListener("click", saveAdminLeaderboardEntry);
   $("#save-final-scores")?.addEventListener("click", saveFinalScores);
-  $("#admin-lb-mode")?.addEventListener("change", updateLeaderboardFormMode);
-  $("#admin-lb-registration")?.addEventListener("change", (event) => applyApprovedRegistrationToLeaderboard(event.target.value));
   $("#export-registrations")?.addEventListener("click", exportRegistrationsCsv);
   $("#clear-registrations")?.addEventListener("click", clearRegistrations);
   $("#export-state")?.addEventListener("click", exportStateJson);
@@ -1020,6 +1208,17 @@ function setupAdminListeners() {
   $("#room-share-format")?.addEventListener("change", updateRoomShareChoices);
   $("#room-share-variant")?.addEventListener("change", updateRoomShareChoices);
   $("#save-room-details")?.addEventListener("click", saveRoomDetails);
+  $("#save-schedule-settings")?.addEventListener("click", saveScheduleSettings);
+  $("#save-payment-settings")?.addEventListener("click", savePaymentSettings);
+  ["#br-start-time", "#br-duration", "#br-gap", "#cs-start-time", "#cs-duration", "#cs-gap"].forEach((selector) => $(selector)?.addEventListener("change", updateAdminSchedulePreview));
+  $("#payment-qr-file")?.addEventListener("change", () => handleQrFile("payment"));
+  $("#room-qr-file")?.addEventListener("change", () => handleQrFile("room"));
+  $("#clear-payment-qr")?.addEventListener("click", () => { PAYMENT_QR_DATA = ""; if ($("#payment-qr-file")) $("#payment-qr-file").value = ""; setQrPreview("payment", ""); });
+  $("#clear-room-qr")?.addEventListener("click", () => { ROOM_QR_DATA = ""; if ($("#room-qr-file")) $("#room-qr-file").value = ""; setQrPreview("room", ""); });
+  $("#room-share-room")?.addEventListener("change", loadRoomDetailAdminFields);
+  $("#edit-registration-form")?.addEventListener("submit", saveRegistrationEdits);
+  $("#edit-registration-close")?.addEventListener("click", () => $("#edit-registration-modal")?.close());
+  $("#edit-registration-cancel")?.addEventListener("click", () => $("#edit-registration-modal")?.close());
 }
 
 function renderAdminPanel() {
@@ -1027,7 +1226,7 @@ function renderAdminPanel() {
   populateFormatSelect($("#admin-format"), "solo");
   updateAdminRoomChoices();
   updateRoomShareChoices();
-  updateLeaderboardFormMode();
+  populateAdminSettingsFromSummary(ADMIN_SUMMARY || {});
   renderAdminTables();
 }
 
@@ -1081,70 +1280,6 @@ async function saveAdminRoomCount() {
   toast("Room count updated locally. Export/publish state for players to see it globally.");
 }
 
-function updateLeaderboardFormMode() {
-  const mode = $("#admin-lb-mode")?.value || "br";
-  $$("[data-lb-field]").forEach((field) => {
-    const showFor = field.dataset.lbField;
-    field.classList.toggle("hidden", showFor !== mode && showFor !== "both");
-  });
-}
-
-async function saveAdminLeaderboardEntry() {
-  const mode = $("#admin-lb-mode")?.value || "br";
-  const teamName = clean($("#admin-lb-team")?.value);
-  if (!teamName) return toast("Enter team name.", true);
-  const common = {
-    id: `LB-${Date.now()}`,
-    teamName,
-    fee: Number($("#admin-lb-fee")?.value || 20),
-    roomId: clean($("#admin-lb-room")?.value),
-    updatedAt: new Date().toISOString()
-  };
-  let entry;
-  if (mode === "br") {
-    const format = $("#admin-lb-brformat")?.value || "squad";
-    const formatInfo = battleFormatById(format);
-    entry = {
-      ...common,
-      format,
-      formatLabel: formatInfo?.label || format,
-      matchesPlayed: Number($("#admin-lb-matches")?.value || 0),
-      booyah: Number($("#admin-lb-booyah")?.value || 0),
-      placementPoints: Number($("#admin-lb-placement")?.value || 0),
-      kills: Number($("#admin-lb-kills")?.value || 0),
-      penalty: Number($("#admin-lb-penalty")?.value || 0)
-    };
-  } else {
-    entry = {
-      ...common,
-      variant: $("#admin-lb-variant")?.value || "Normal",
-      wins: Number($("#admin-lb-wins")?.value || 0),
-      losses: Number($("#admin-lb-losses")?.value || 0),
-      roundDiff: Number($("#admin-lb-rounddiff")?.value || 0),
-      penalty: Number($("#admin-lb-penalty")?.value || 0)
-    };
-  }
-
-  if (SERVER_AVAILABLE && currentAdminPin) {
-    await apiPost("/api/admin/leaderboard", { pin: currentAdminPin, mode, entry });
-    await refreshStateFromServer();
-    renderAdminTables();
-    renderLeaderboards("#admin-br-preview", "br");
-    renderLeaderboards("#admin-cs-preview", "cs");
-    toast("Leaderboard entry published live.");
-    return;
-  }
-
-  const state = loadState();
-  state.leaderboard[mode].push(entry);
-  saveState(state);
-  renderAdminTables();
-  renderLeaderboards("#admin-br-preview", "br");
-  renderLeaderboards("#admin-cs-preview", "cs");
-  toast("Leaderboard entry saved locally.");
-}
-
-
 function updateRoomShareChoices() {
   populateFeeSelect($("#room-share-fee"), Number($("#room-share-fee")?.value || getFeeTiers("br")[0]), $("#room-share-mode")?.value || "br");
   populateFormatSelect($("#room-share-format"), $("#room-share-format")?.value || "solo");
@@ -1159,7 +1294,57 @@ function updateRoomShareChoices() {
   const rooms = getRooms({ mode, fee, format: mode === "br" ? format : undefined, variant: mode === "cs" ? variant : undefined });
   const select = $("#room-share-room");
   if (!select) return;
-  select.innerHTML = rooms.map((room) => `<option value="${room.id}">${room.title} (${getConfirmedTeams(room)}/${room.capacity} ${entryLabel(room)})</option>`).join("");
+  const previousRoom = select.value;
+  select.innerHTML = rooms.map((room) => `<option value="${escapeHtml(room.id)}">${escapeHtml(room.title)} (${getConfirmedTeams(room)}/${room.capacity} ${entryLabel(room)})</option>`).join("");
+  if (rooms.some((room) => room.id === previousRoom)) select.value = previousRoom;
+  loadRoomDetailAdminFields();
+}
+
+function setQrPreview(kind, dataUrl) {
+  const wrap = $(`#${kind}-qr-preview-wrap`);
+  const image = $(`#${kind}-qr-preview`);
+  if (image) image.src = dataUrl || "";
+  if (wrap) wrap.classList.toggle("hidden", !dataUrl);
+}
+
+function handleQrFile(kind) {
+  const input = $(`#${kind}-qr-file`);
+  const file = input?.files?.[0];
+  if (!file) return;
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    toast("Choose a PNG, JPG, or WebP QR image.", true);
+    input.value = "";
+    return;
+  }
+  if (file.size > 1_000_000) {
+    toast("QR image must be 1 MB or smaller.", true);
+    input.value = "";
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const value = String(reader.result || "");
+    if (kind === "payment") PAYMENT_QR_DATA = value;
+    else ROOM_QR_DATA = value;
+    setQrPreview(kind, value);
+  };
+  reader.onerror = () => toast("Could not read QR image.", true);
+  reader.readAsDataURL(file);
+}
+
+function loadRoomDetailAdminFields() {
+  const roomId = $("#room-share-room")?.value;
+  if (!roomId) return;
+  const details = ADMIN_SUMMARY?.roomDetails || loadState().roomDetails || {};
+  const detail = details[roomId] || {};
+  if ($("#custom-room-id")) $("#custom-room-id").value = detail.customRoomId || "";
+  if ($("#custom-room-password")) $("#custom-room-password").value = detail.password || "";
+  if ($("#custom-room-message")) $("#custom-room-message").value = detail.message || "";
+  if ($("#room-published")) $("#room-published").checked = detail.published !== false;
+  if ($("#room-force-publish")) $("#room-force-publish").checked = Boolean(detail.forcePublish);
+  ROOM_QR_DATA = detail.roomQrDataUrl || "";
+  setQrPreview("room", ROOM_QR_DATA);
+  if ($("#room-qr-file")) $("#room-qr-file").value = "";
 }
 
 async function saveRoomDetails() {
@@ -1170,17 +1355,100 @@ async function saveRoomDetails() {
   const forcePublish = Boolean($("#room-force-publish")?.checked);
   const published = Boolean($("#room-published")?.checked);
   if (!roomId || !customRoomId || !password) return toast("Select room and enter room ID plus password.", true);
-  const detail = { roomId, customRoomId, password, message, forcePublish, published, updatedAt: new Date().toISOString() };
-  if (SERVER_AVAILABLE && currentAdminPin) {
-    await apiPost("/api/admin/room-details", { pin: currentAdminPin, detail });
-    await refreshStateFromServer();
-    toast("Room ID/password published live according to your release settings.");
-    return;
+  const detail = { roomId, customRoomId, password, message, roomQrDataUrl: ROOM_QR_DATA, forcePublish, published, updatedAt: new Date().toISOString() };
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/room-details", { pin: currentAdminPin, detail });
+      await refreshStateFromServer();
+      await renderAdminTables();
+      renderPage();
+      toast("Room ID/password and optional QR saved live according to your release settings.");
+      return;
+    }
+    const state = loadState();
+    state.roomDetails[roomId] = detail;
+    saveState(state);
+    toast("Room details saved locally on this device.");
+    renderRoomDetailsPage();
+  } catch (error) {
+    toast(error.message || "Could not save room details.", true);
   }
-  const state = loadState();
-  state.roomDetails[roomId] = detail;
-  saveState(state);
-  toast("Room details saved locally.");
+}
+
+function buildClientScheduleWindows(settings) {
+  const output = { br: [], cs: [] };
+  ["br", "cs"].forEach((mode) => {
+    const conf = settings[mode];
+    const [hour, minute] = conf.startTime.split(":").map(Number);
+    for (let index = 0; index < 3; index += 1) {
+      const start = hour * 60 + minute + index * (Number(conf.durationHours) + Number(conf.gapHours)) * 60;
+      const end = start + Number(conf.durationHours) * 60;
+      const format = (total) => {
+        const day = Math.floor(total / 1440);
+        const minuteOfDay = total % 1440;
+        const h = Math.floor(minuteOfDay / 60);
+        const m = minuteOfDay % 60;
+        return { text: formatClockForAdmin(h, m), day };
+      };
+      const from = format(start);
+      const to = format(end);
+      const daySuffix = from.day > 0 ? " (+1 day)" : to.day > from.day ? (end % 1440 === 0 ? " (midnight)" : " (+1 day)") : "";
+      output[mode].push({ id: `slot${index + 1}`, label: `Slot ${index + 1}`, time: `${from.text}–${to.text}${daySuffix}`, durationHours: Number(conf.durationHours), matches: mode === "br" ? 3 : 1 });
+    }
+  });
+  return output;
+}
+
+async function saveScheduleSettings() {
+  const settings = adminScheduleSettingsFromControls();
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/schedule-settings", { pin: currentAdminPin, settings });
+      await refreshStateFromServer();
+      await renderAdminTables();
+      renderSchedulePage();
+      toast("Separate BR and CS times saved and published live.");
+      return;
+    }
+    const state = loadState();
+    state.scheduleWindows = buildClientScheduleWindows(settings);
+    state.scheduleSettings = settings;
+    saveState(state);
+    SERVER_STATE = state;
+    SERVER_AVAILABLE = false;
+    renderSchedulePage();
+    populateMatchTimeSelects();
+    toast("Timings saved locally. A shared backend is needed to publish to all players.");
+  } catch (error) {
+    toast(error.message || "Could not save schedule settings.", true);
+  }
+}
+
+async function savePaymentSettings() {
+  const settings = {
+    payeeName: clean($("#payment-payee")?.value),
+    upiId: clean($("#payment-upi-id")?.value),
+    note: clean($("#payment-note")?.value),
+    qrDataUrl: PAYMENT_QR_DATA
+  };
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/payment-settings", { pin: currentAdminPin, settings });
+      await refreshStateFromServer();
+      await renderAdminTables();
+      $$('[data-registration-form]').forEach(renderPaymentInstructions);
+      toast("Payment QR/UPI instructions published. UTR verification remains manual.");
+      return;
+    }
+    const state = loadState();
+    state.paymentSettings = settings;
+    saveState(state);
+    SERVER_STATE = state;
+    $$('[data-registration-form]').forEach(renderPaymentInstructions);
+    toast("Payment details saved locally. A shared backend is needed to publish to all players.");
+  } catch (error) {
+    toast(error.message || "Could not save payment instructions.", true);
+  }
 }
 
 async function renderAdminTables() {
@@ -1190,9 +1458,11 @@ async function renderAdminTables() {
     try {
       const summary = await apiPost("/api/admin/summary", { pin: currentAdminPin });
       summaryForCards = summary;
+      ADMIN_SUMMARY = summary;
       state = normalizeState({ ...loadState(), registrations: summary.registrations || [] });
       ADMIN_REGISTRATIONS = summary.registrations || [];
       renderAdminSummaryCards(summary);
+      populateAdminSettingsFromSummary(summary);
     } catch (error) {
       toast(error.message || "Could not load admin summary.", true);
     }
@@ -1204,12 +1474,16 @@ async function renderAdminTables() {
       approvedEntries: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").length,
       approvedPlayers: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").reduce((sum, r) => sum + Number(r.playersPerEntry || r.players?.length || 0), 0),
       approvedReportedPaidAmount: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved" && r.paymentRef).reduce((sum, r) => sum + Number(r.fee || 0), 0),
-      approvedExpectedAmount: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").reduce((sum, r) => sum + Number(r.fee || 0), 0)
+      approvedExpectedAmount: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").reduce((sum, r) => sum + Number(r.fee || 0), 0),
+      scheduleSettings: loadState().scheduleSettings || { br: { startTime: "21:00", durationHours: 1, gapHours: 0 }, cs: { startTime: "21:00", durationHours: 1, gapHours: 0 } },
+      paymentSettings: loadState().paymentSettings || {},
+      roomDetails: loadState().roomDetails || {}
     };
+    ADMIN_SUMMARY = summaryForCards;
     renderAdminSummaryCards(summaryForCards);
+    populateAdminSettingsFromSummary(summaryForCards);
   }
 
-  updateApprovedTeamSelect();
   renderFinalScoreTable();
 
   const regs = $("#admin-registrations");
@@ -1224,6 +1498,8 @@ async function renderAdminTables() {
           <td class="admin-row-actions">
             <button class="btn small" type="button" data-reg-action="Approved" data-reg-id="${escapeHtml(r.id)}">Approve</button>
             <button class="btn small ghost danger" type="button" data-reg-action="Rejected" data-reg-id="${escapeHtml(r.id)}">Reject</button>
+            <button class="btn small ghost" type="button" data-reg-edit="${escapeHtml(r.id)}">Edit names</button>
+            <button class="btn small ghost danger" type="button" data-reg-delete="${escapeHtml(r.id)}">Remove</button>
           </td>
           <td>${escapeHtml(r.id)}</td>
           <td>${escapeHtml(r.modeLabel)}</td>
@@ -1241,10 +1517,98 @@ async function renderAdminTables() {
       $$('[data-reg-action]', regs).forEach((button) => {
         button.addEventListener("click", () => updateRegistrationStatus(button.dataset.regId, button.dataset.regAction));
       });
+      $$('[data-reg-edit]', regs).forEach((button) => button.addEventListener("click", () => openRegistrationEditor(button.dataset.regEdit)));
+      $$('[data-reg-delete]', regs).forEach((button) => button.addEventListener("click", () => deleteRegistration(button.dataset.regDelete)));
     }
   }
   renderLeaderboards("#admin-br-preview", "br");
   renderLeaderboards("#admin-cs-preview", "cs");
+}
+
+function openRegistrationEditor(registrationId) {
+  const reg = ADMIN_REGISTRATIONS.find((item) => String(item.id) === String(registrationId));
+  if (!reg) return toast("Registration not found.", true);
+  EDITING_REGISTRATION_ID = String(reg.id);
+  const teamField = $("#edit-team-name");
+  const list = $("#edit-player-list");
+  if (teamField) teamField.value = reg.teamName || "";
+  if (list) {
+    const players = Array.isArray(reg.players) && reg.players.length ? reg.players : [{ ign: reg.iglName || reg.captainName || "", uid: reg.iglUid || "" }];
+    list.innerHTML = players.slice(0, 4).map((player, index) => `
+      <div class="edit-player-row" data-edit-player-row="${index}">
+        <label>${index === 0 ? "Player 1 / IGL IGN" : `Player ${index + 1} IGN`}
+          <input type="text" maxlength="80" data-edit-player-name value="${escapeHtml(player.ign || "")}" ${index === 0 ? "required" : ""} />
+        </label>
+        <small>Free Fire ID: ${escapeHtml(player.uid || "not provided")}</small>
+        ${index > 0 ? `<label class="checkbox-line"><input type="checkbox" data-edit-player-remove /> Remove Player ${index + 1} from this roster</label>` : `<small>Player 1/IGL must remain, but the name can be changed.</small>`}
+      </div>`).join("");
+  }
+  const modal = $("#edit-registration-modal");
+  if (modal?.showModal) modal.showModal();
+  else modal?.classList.remove("hidden");
+}
+
+async function saveRegistrationEdits(event) {
+  event.preventDefault();
+  const reg = ADMIN_REGISTRATIONS.find((item) => String(item.id) === EDITING_REGISTRATION_ID);
+  if (!reg) return toast("Registration not found.", true);
+  const teamName = clean($("#edit-team-name")?.value);
+  if (!teamName) return toast("Enter an entry/team name.", true);
+  const existingPlayers = Array.isArray(reg.players) ? reg.players : [];
+  const playerRows = $$("[data-edit-player-row]", $("#edit-player-list"));
+  const players = playerRows.map((row, index) => ({
+    ign: clean($("[data-edit-player-name]", row)?.value),
+    uid: existingPlayers[index]?.uid || (index === 0 ? reg.iglUid || "" : ""),
+    remove: Boolean($("[data-edit-player-remove]", row)?.checked)
+  }));
+  if (!players.length || !players[0].ign) return toast("Player 1/IGL name cannot be blank.", true);
+  if (players.some((player, index) => index > 0 && !player.remove && !player.ign)) return toast("Fill a name or choose Remove for each teammate.", true);
+  const payload = { registrationId: reg.id, teamName, iglName: players[0].ign, players };
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/edit-registration", { pin: currentAdminPin, ...payload });
+      await refreshStateFromServer();
+    } else {
+      const state = loadState();
+      const localReg = state.registrations.find((item) => String(item.id) === EDITING_REGISTRATION_ID);
+      if (!localReg) throw new Error("Registration not found on this device.");
+      localReg.teamName = teamName;
+      localReg.iglName = players[0].ign;
+      localReg.captainName = players[0].ign;
+      localReg.iglUid = players[0].uid;
+      localReg.players = players.filter((player, index) => index === 0 || !player.remove).map(({ ign, uid }) => ({ ign, uid }));
+      localReg.playersPerEntry = localReg.players.length;
+      saveState(state);
+    }
+    $("#edit-registration-modal")?.close();
+    await renderAdminTables();
+    renderLeaderboards("#admin-br-preview", "br");
+    renderLeaderboards("#admin-cs-preview", "cs");
+    toast("Entry name and roster updated.");
+  } catch (error) {
+    toast(error.message || "Could not save registration edits.", true);
+  }
+}
+
+async function deleteRegistration(registrationId) {
+  const reg = ADMIN_REGISTRATIONS.find((item) => String(item.id) === String(registrationId));
+  if (!reg) return toast("Registration not found.", true);
+  if (!confirm(`Remove ${reg.teamName || "this registration"}? This frees the reserved lobby slot and cannot be undone.`)) return;
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/delete-registration", { pin: currentAdminPin, registrationId });
+      await refreshStateFromServer();
+    } else {
+      const state = loadState();
+      state.registrations = (state.registrations || []).filter((item) => String(item.id) !== String(registrationId));
+      saveState(state);
+    }
+    await renderAdminTables();
+    renderPage();
+    toast("Registration removed and slot released.");
+  } catch (error) {
+    toast(error.message || "Could not remove registration.", true);
+  }
 }
 
 function renderFinalScoreTable() {
@@ -1252,67 +1616,91 @@ function renderFinalScoreTable() {
   if (!box) return;
   const approved = ADMIN_REGISTRATIONS.filter((reg) => String(reg.status || "").toLowerCase() === "approved").sort((a, b) => String(a.roomId || "").localeCompare(String(b.roomId || "")) || Number(a.slotNumber || 99) - Number(b.slotNumber || 99));
   if (!approved.length) {
-    box.innerHTML = `<div class="empty-state"><h3>No approved teams to score yet</h3><p>Approve registrations above. Each approved entry will appear here with its slot number and team name.</p></div>`;
+    box.innerHTML = `<div class="empty-state"><h3>No approved teams to score yet</h3><p>Approve registrations above. Each approved entry will appear here with the correct match-result controls.</p></div>`;
     return;
   }
-  const rows = approved.map((reg) => `
-    <tr>
-      <td><b>${slotLabel(reg)}</b></td>
-      <td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td>
-      <td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(reg.formatLabel || reg.variant || "-")}</td>
-      <td>${reg.fee ? formatFee(reg.fee) : "—"}</td>
-      <td>${escapeHtml(reg.scheduleTime || reg.scheduleSlotLabel || "To be announced")}</td>
-      <td>${escapeHtml(reg.roomTitle || "-")}<br><small>${escapeHtml(reg.roomId || "")}</small></td>
-      <td><input class="score-input" type="number" min="0" max="99999" step="1" inputmode="numeric" data-final-score-id="${escapeHtml(reg.id)}" value="${reg.finalScore === null || reg.finalScore === undefined ? "" : escapeHtml(reg.finalScore)}" placeholder="Final score" aria-label="Final score for ${escapeHtml(reg.teamName || "team")}" /></td>
-    </tr>`).join("");
-  box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Slot</th><th>Team & roster</th><th>Mode / format</th><th>Fee</th><th>Match time</th><th>Lobby / room ID</th><th>Final score</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const rows = approved.map((reg) => {
+    const mode = reg.mode || (String(reg.roomId || "").startsWith("CS-") ? "cs" : "br");
+    const resultControl = mode === "br" ? `<div class="br-score-editor">${[0, 1, 2].map((index) => {
+      const match = reg.brMatches?.[index] || {};
+      const positionOptions = [`<option value="">Place</option>`, ...Array.from({ length: 12 }, (_, posIndex) => {
+        const position = posIndex + 1;
+        const selected = Number(match.position) === position ? "selected" : "";
+        return `<option value="${position}" ${selected}>#${position} · ${DATA.scoring.br.placement[position]} pts</option>`;
+      })].join("");
+      return `<fieldset class="br-match-input"><legend>Match ${index + 1}</legend><label>Kills<input class="score-input" type="number" min="0" max="99" step="1" inputmode="numeric" data-match-kills="${escapeHtml(reg.id)}" data-match-index="${index}" value="${match.kills ?? ""}" aria-label="Kills in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}" /></label><label>Placement<select data-match-position="${escapeHtml(reg.id)}" data-match-index="${index}" aria-label="Placement in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}">${positionOptions}</select></label></fieldset>`;
+    }).join("")}</div>` : `<div class="cs-score-editor"><label>Match result<select data-cs-outcome="${escapeHtml(reg.id)}"><option value="" ${!reg.csResult?.outcome ? "selected" : ""}>Not entered</option><option value="Win" ${reg.csResult?.outcome === "Win" ? "selected" : ""}>Win · 3 points</option><option value="Loss" ${reg.csResult?.outcome === "Loss" ? "selected" : ""}>Loss · 0 points</option></select></label><label>Round difference<input class="score-input" type="number" min="-99" max="99" step="1" data-cs-round-diff="${escapeHtml(reg.id)}" value="${reg.csResult?.roundDiff ?? ""}" placeholder="e.g. 3 or -2" /></label></div>`;
+    return `<tr><td><b>${slotLabel(reg)}</b></td><td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(reg.formatLabel || reg.variant || "-")}<br><small>${escapeHtml(reg.scheduleTime || "")}</small></td><td>${resultControl}</td><td><b>${reg.finalScore ?? "Awaiting"}</b></td></tr>`;
+  }).join("");
+  box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Slot</th><th>Entry / roster</th><th>Mode · time</th><th>Verified result inputs</th><th>Current points</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 async function saveFinalScores() {
-  const fields = $$('[data-final-score-id]');
-  if (!fields.length) return toast("Approve at least one registration first.", true);
-  const scores = [];
-  for (const field of fields) {
-    const raw = field.value.trim();
-    if (raw === "") {
-      scores.push({ registrationId: field.dataset.finalScoreId, finalScore: null });
-      continue;
+  if (!ADMIN_REGISTRATIONS.length) return toast("No registrations loaded.", true);
+  const approved = ADMIN_REGISTRATIONS.filter((reg) => String(reg.status || "").toLowerCase() === "approved");
+  if (!approved.length) return toast("Approve at least one registration first.", true);
+  const results = [];
+  for (const reg of approved) {
+    const mode = reg.mode || (String(reg.roomId || "").startsWith("CS-") ? "cs" : "br");
+    if (mode === "br") {
+      const matches = [0, 1, 2].map((index) => {
+        const killsInput = $(`[data-match-kills="${CSS.escape(String(reg.id))}"][data-match-index="${index}"]`);
+        const positionInput = $(`[data-match-position="${CSS.escape(String(reg.id))}"][data-match-index="${index}"]`);
+        const kills = killsInput?.value.trim() || "";
+        const position = positionInput?.value || "";
+        return { kills: kills === "" ? null : Number(kills), position: position === "" ? null : Number(position) };
+      });
+      if (matches.some((match) => (match.kills === null) !== (match.position === null))) return toast(`Enter both kills and placement, or leave both blank, for ${reg.teamName}.`, true);
+      results.push({ registrationId: reg.id, matches });
+    } else {
+      const outcome = $(`[data-cs-outcome="${CSS.escape(String(reg.id))}"]`)?.value || "";
+      const rawRoundDiff = $(`[data-cs-round-diff="${CSS.escape(String(reg.id))}"]`)?.value.trim() || "";
+      const roundDiff = rawRoundDiff === "" ? 0 : Number(rawRoundDiff);
+      if (!Number.isInteger(roundDiff) || roundDiff < -99 || roundDiff > 99) return toast(`Enter a valid round difference for ${reg.teamName}.`, true);
+      results.push({ registrationId: reg.id, csResult: { outcome, roundDiff } });
     }
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value < 0 || value > 99999) return toast("Enter final scores from 0 to 99,999.", true);
-    scores.push({ registrationId: field.dataset.finalScoreId, finalScore: value });
   }
   try {
     if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/final-scores", { pin: currentAdminPin, scores });
+      await apiPost("/api/admin/match-results", { pin: currentAdminPin, results });
       await refreshStateFromServer();
       await renderAdminTables();
-      toast("Final scores saved. The public leaderboard will update live.");
+      renderLeaderboards("#admin-br-preview", "br");
+      renderLeaderboards("#admin-cs-preview", "cs");
+      toast("Match results saved. Points and public standings updated.");
       return;
     }
     const state = loadState();
-    scores.forEach((item) => {
+    results.forEach((item) => {
       const reg = (state.registrations || []).find((entry) => String(entry.id) === String(item.registrationId));
       if (!reg || String(reg.status || "").toLowerCase() !== "approved") return;
-      if (item.finalScore === null) delete reg.finalScore;
-      else reg.finalScore = item.finalScore;
+      if (item.matches) {
+        reg.brMatches = item.matches.map((match) => {
+          if (match.kills === null || match.position === null) return { kills: null, position: null, score: null };
+          const score = Number(match.kills) + Number(DATA.scoring.br.placement[match.position] || 0);
+          return { ...match, score };
+        });
+        const scored = reg.brMatches.filter((match) => match.score !== null);
+        if (scored.length) {
+          reg.finalScore = scored.reduce((sum, match) => sum + match.score, 0);
+          reg.scoreUpdatedAt = new Date().toISOString();
+        } else delete reg.finalScore;
+        delete reg.csResult;
+      } else {
+        reg.csResult = item.csResult.outcome ? { outcome: item.csResult.outcome, roundDiff: item.csResult.roundDiff } : {};
+        if (item.csResult.outcome) reg.finalScore = item.csResult.outcome === "Win" ? 3 : 0;
+        else delete reg.finalScore;
+        delete reg.brMatches;
+      }
     });
     saveState(state);
     ADMIN_REGISTRATIONS = state.registrations || [];
     await renderAdminTables();
-    toast("Final scores saved on this device.");
+    toast("Match results saved locally. A shared backend is needed for public live standings.");
   } catch (error) {
-    toast(error.message || "Could not save final scores.", true);
+    toast(error.message || "Could not save match results.", true);
   }
 }
-
-function updateApprovedTeamSelect() {
-  const select = $("#admin-lb-registration");
-  if (!select) return;
-  const approved = ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved");
-  select.innerHTML = `<option value="">Select approved team/player</option>` + approved.map((r) => `<option value="${escapeHtml(r.id)}">#${escapeHtml(r.slotNumber || "-")} ${escapeHtml(r.teamName)} — ${escapeHtml(r.formatLabel || r.variant || r.modeLabel)} — ${escapeHtml(r.roomId)}</option>`).join("");
-}
-
 async function updateRegistrationStatus(registrationId, status) {
   if (!registrationId) return;
   if (SERVER_AVAILABLE && currentAdminPin) {
@@ -1337,22 +1725,6 @@ async function updateRegistrationStatus(registrationId, status) {
   renderPage();
   toast(`Registration marked ${status} locally.`);
 }
-
-function applyApprovedRegistrationToLeaderboard(registrationId) {
-  const reg = ADMIN_REGISTRATIONS.find((r) => r.id === registrationId);
-  if (!reg) return;
-  const mode = reg.mode || (reg.modeLabel === "Battle Royale" ? "br" : "cs");
-  const modeSelect = $("#admin-lb-mode");
-  if (modeSelect) modeSelect.value = mode;
-  updateLeaderboardFormMode();
-  if ($("#admin-lb-team")) $("#admin-lb-team").value = reg.teamName || "";
-  if ($("#admin-lb-fee")) $("#admin-lb-fee").value = reg.fee || 0;
-  if ($("#admin-lb-room")) $("#admin-lb-room").value = reg.roomId || "";
-  if (mode === "br" && $("#admin-lb-brformat")) $("#admin-lb-brformat").value = reg.format || "squad";
-  if (mode === "cs" && $("#admin-lb-variant")) $("#admin-lb-variant").value = reg.variant || "Normal";
-  toast("Approved registration loaded into leaderboard form. Now enter score/kills/wins and save.");
-}
-
 
 function renderAdminSummaryCards(summary) {
   const box = $("#admin-live-summary");
