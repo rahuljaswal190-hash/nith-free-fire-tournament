@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Clash Squad Registration | NIT Hamirpur Free Fire Tournament</title>
-  <meta name="description" content="Register for Normal or One Tap Clash Squad rooms with live slot availability." />
-  <link rel="stylesheet" href="styles.css?v=20261006-final-v6" />
+  <meta name="description" content="Register for Normal or One Tap Clash Squad in Solo 1v1, Duo 2v2, Trio 3v3, or Squad 4v4 formats." />
+  <link rel="stylesheet" href="styles.css?v=20261008-variable-cs-v1" />
 </head>
 <body data-page="clash" id="top">
 <header class="site-header">
@@ -33,7 +33,7 @@
     <div class="reveal">
       <span class="eyebrow"><span class="pulse-dot"></span> Clash Squad</span>
       <h1 class="page-title">Normal or <span>One Tap</span> Clash Squad.</h1>
-      <p class="page-lead">Each Clash Squad room has 2 teams, one match, and a winner reward. Select a fee tier, choose Normal or One Tap, check slots, then register your four-player roster.</p>
+      <p class="page-lead">Each Clash Squad room is one match between two sides. Choose 1v1, 2v2, 3v3, or 4v4, then register only the players required for that size. Normal and One Tap modes are available.</p>
     </div>
   </section>
 
@@ -41,6 +41,7 @@
     <div class="filters">
       <label>Fee Tier<select id="cs-tier-filter"></select></label>
       <label>Match Type<select id="cs-variant-filter"><option value="Normal">Normal Clash Squad</option><option value="One Tap">One Tap Clash Squad</option></select></label>
+      <label>Team Size<select id="cs-format-filter"></select></label>
     </div>
     <div class="stats-grid three" id="cs-stats"></div>
     <p class="note-box" id="cs-prize-note"></p>
@@ -51,18 +52,21 @@
     <div class="form-grid">
       <div class="note-box">
         <h2>Before you register</h2>
-        <p>Use correct Free Fire UID and IGN for all four players. Room ID/password will be shared privately after verification. Do not share room details publicly.</p>
+        <p>Enter a valid Free Fire UID and IGN for each player required by your selected side size. The fee tier is charged once per registered side/team, regardless of whether it is a 1v1 or 4v4. Room ID/password will be shared privately after verification.</p>
         <p>One Tap settings/weapons will be announced by admins before the match. If a player uses banned settings or unfair tools, the team can be disqualified.</p>
       </div>
       <form class="form-card" data-registration-form data-mode="cs">
   <h2>Clash Squad Registration</h2>
-  <p>Clash Squad entry starts directly from ₹50 per team. Your slot is reserved when you register; approval remains pending until the organizer reviews it.</p>
+  <p>Choose your side size and mode below. The selected fee is charged once per registered side/team, not per player. Your slot is reserved on submission; approval remains pending until the organizer reviews your payment reference.</p>
   <div class="field-grid">
-    <label>Team Name<input name="teamName" placeholder="Optional, example: NITH Warriors" /></label>
-    <label>IGL Name<input required name="iglName" placeholder="In-game leader name" /></label>
-    <label>IGL Free Fire ID<input required name="iglUid" inputmode="numeric" placeholder="Numeric Free Fire ID" /></label>
+    <label>Side Name<input name="teamName" placeholder="Optional side/team name" /></label>
+    <label>Captain / Player 1 Name<input required name="iglName" placeholder="In-game name" /></label>
+    <label>Captain / Player 1 Free Fire ID<input required name="iglUid" inputmode="numeric" placeholder="Numeric Free Fire ID" /></label>
     <label>WhatsApp Number<input required name="whatsapp" inputmode="tel" placeholder="10-digit mobile number" /></label>
-    <label>Match Type
+    <label>Team Size
+  <select name="format" id="cs-form-format"></select>
+</label>
+<label>Match Type
   <select name="variant" id="cs-form-variant">
     <option value="Normal">Normal Clash Squad</option>
     <option value="One Tap">One Tap Clash Squad</option>
@@ -76,8 +80,8 @@
 </label>
   </div>
   <div class="player-section">
-    <h3>Team Members</h3>
-    <p class="disclaimer">IGL is counted as Player 1. Add the other three teammates below.</p>
+    <h3>Players on this side</h3>
+    <p class="disclaimer" data-roster-help aria-live="polite">Choose a side size to see the required roster.</p>
     <div class="player-row" data-player-row="2">
       <label>Player 2 Name<input required name="p2Name" placeholder="In-game name" /></label>
       <label>Player 2 Free Fire ID<input required name="p2Uid" inputmode="numeric" placeholder="Numeric Free Fire ID" /></label>
@@ -93,7 +97,7 @@
   </div>
   <div class="payment-instructions" data-payment-instructions aria-live="polite"></div>
   <label>Payment UTR / Reference<input required name="paymentRef" placeholder="Enter UTR/reference, or write Pay after confirmation" /></label>
-  <label class="checkbox-line"><input type="checkbox" name="acceptedRules" required /> I confirm my team has read the rules, fair-play policy, payment/prize variation note, and room confirmation process.</label>
+  <label class="checkbox-line"><input type="checkbox" name="acceptedRules" required /> I confirm all registered players have read the rules, fair-play policy, payment/prize note, and room confirmation process.</label>
   <button class="btn full" type="submit">Submit Clash Squad Registration</button>
 </form>
     </div>
@@ -122,7 +126,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261006-final-v6"></script>
-<script src="site.js?v=20261006-final-v6"></script>
+<script src="data.js?v=20261008-variable-cs-v1"></script>
+<script src="site.js?v=20261008-variable-cs-v1"></script>
 </body>
 </html>

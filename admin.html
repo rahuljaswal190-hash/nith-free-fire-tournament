@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Admin tools for timings, registration edits, QR payments, room details, and verified match results." />
-  <link rel="stylesheet" href="styles.css?v=20261008-date-archive-v1" />
+  <link rel="stylesheet" href="styles.css?v=20261008-variable-cs-v1" />
 </head>
 <body data-page="admin" id="top">
 <header class="site-header">
@@ -74,11 +74,12 @@
 
       <article class="admin-box">
         <h2>Update room slots</h2>
-        <p>Set confirmed/filled entries for any room. Battle Royale lobbies have up to 12 entries/teams (slots 1–12). Clash Squad rooms have 2 teams.</p>
+        <p>Set the number of confirmed entries in any selected lobby. Battle Royale capacity is 12 entries; each Clash Squad room holds exactly 2 sides of the selected size.</p>
         <div class="field-grid">
           <label>Mode<select id="admin-mode"><option value="br">Battle Royale</option><option value="cs">Clash Squad</option></select></label>
           <label>Fee<select id="admin-fee"></select></label>
           <label id="admin-format-wrap">Battle Royale Format<select id="admin-format"></select></label>
+          <label id="admin-cs-format-wrap" class="hidden">Clash Squad Team Size<select id="admin-cs-format"></select></label>
           <label id="admin-variant-wrap" class="hidden">Type<select id="admin-variant"><option value="Normal">Normal</option><option value="One Tap">One Tap</option></select></label>
           <label>Room<select id="admin-room"></select></label>
           <label>Confirmed entries/teams<input id="admin-confirmed-count" type="number" min="0" value="0" /></label>
@@ -93,6 +94,7 @@
           <label>Mode<select id="room-share-mode"><option value="br">Battle Royale</option><option value="cs">Clash Squad</option></select></label>
           <label>Fee<select id="room-share-fee"></select></label>
           <label id="room-share-format-wrap">Battle Royale Format<select id="room-share-format"></select></label>
+          <label id="room-share-cs-format-wrap" class="hidden">Clash Squad Team Size<select id="room-share-cs-format"></select></label>
           <label id="room-share-variant-wrap" class="hidden">Type<select id="room-share-variant"><option value="Normal">Normal</option><option value="One Tap">One Tap</option></select></label>
           <label>Website Room<select id="room-share-room"></select></label>
           <label>Custom Room ID<input id="custom-room-id" placeholder="Enter Free Fire room ID" /></label>
@@ -103,7 +105,8 @@
         <label class="checkbox-line"><input type="checkbox" id="room-force-publish" /> Force release now even if room/lobby is not full</label>
         <label>Optional room join QR<input id="room-qr-file" type="file" accept="image/png,image/jpeg,image/webp" /></label>
         <div id="room-qr-preview-wrap" class="qr-preview-wrap hidden"><img id="room-qr-preview" alt="Room QR preview" /><button class="btn small ghost" id="clear-room-qr" type="button">Remove QR</button></div>
-        <div class="admin-actions"><button class="btn small" id="save-room-details" type="button">Publish Room Details</button></div>
+        <div class="admin-actions"><button class="btn small" id="save-room-details" type="button">Save Room Details</button><button class="btn small ghost danger" id="delete-room-details" type="button">Remove Saved Room Details</button></div>
+        <p class="disclaimer">Removing details hides the room ID, password, and optional QR from the public Room Details page. It does not delete registrations or change the lobby.</p>
       </article>
 
       <article class="admin-box full">
@@ -121,12 +124,12 @@
 
       <article class="admin-box full">
         <h2>Registration calendar</h2>
-        <p>Registration totals are grouped by submission date (IST). Select a day to inspect the entries received that day.</p>
+        <p>Every day is selectable, including dates with no activity. Select any date to review registrations and saved results; the same date is also loaded for result entry below.</p>
         <div class="calendar-toolbar">
           <label>Calendar month<input id="registration-calendar-month" type="month" /></label>
           <p id="registration-calendar-summary" class="disclaimer"></p>
         </div>
-        <div id="registration-calendar" class="registration-calendar" aria-label="Registration counts by day"></div>
+        <div id="registration-calendar" class="registration-calendar" aria-label="Registration and leaderboard counts by date"></div>
         <div id="registrations-for-day" class="registrations-for-day"></div>
       </article>
 
@@ -141,7 +144,7 @@
 
       <article class="admin-box full">
         <h2>Enter verified match results</h2>
-        <p>For each approved BR entry, enter kills and placement position for each of the 3 matches. Points are calculated automatically from kills plus the placement table. For CS, select Win/Loss and enter round difference. Saving publishes last-match details and cumulative standings; BR final score is never typed manually.</p>
+        <p>Select a date in the calendar above or use the date field. For each approved BR entry, enter kills and placement in all 3 matches; for CS, enter Win/Loss and round difference. Save to archive results for that date. Historical edits do not overwrite newer results.</p>
         <label class="result-date-control">Match date (IST)<input id="admin-result-date" type="date" /></label>
         <p class="disclaimer">Results are archived by this date. Selecting an earlier date loads that day's saved values for correction without overwriting newer match results.</p>
         <div id="final-score-table"></div>
@@ -180,11 +183,11 @@
           <li><b>Set schedules:</b> select separate BR and CS start times, session lengths, and gaps. Three slots are retained for both modes; BR is 3 matches per slot and CS is 1.</li>
           <li><b>Verify payments:</b> publish the payment QR and/or UPI ID above. Players submit their UTR/reference. QR/UPI is not an automatic payment gateway; manually verify the reference before approving.</li>
           <li><b>Review registrations:</b> use Approve/Reject after checking the UTR. Edit names supports emoji and symbols; Remove deletes a registration and frees its reserved slot.</li>
-          <li><b>Enter dated results:</b> choose the match date first. BR uses kills and placement for three matches; CS uses Win/Loss and round difference. Previous dates remain archived when a newer date is saved.</li>
+          <li><b>Enter dated results:</b> choose any match date from the calendar or date field. BR uses kills and placement for three matches; CS uses Win/Loss and round difference. Previous dates remain archived when a newer date is saved.</li>
           <li><b>Set leaderboard default:</b> players can choose a saved date; select whether the page opens on latest match results or all-time totals.</li>
-          <li><b>Use the registration calendar:</b> pick a month and click a date with a count to inspect entries received that day.</li>
+          <li><b>Use the calendar:</b> click any day, including an empty day. Registration and saved-result states are shown separately; the selected date also loads into result entry.</li>
           <li><b>Keep storage durable:</b> host <code>server.py</code> on persistent storage and configure <code>TOURNAMENT_DATA_DIR</code>. Free ephemeral storage can be cleared on redeploy/restart; check the status notice above.</li>
-          <li><b>Publish room access:</b> enter the custom Room ID/password and optionally upload a room QR. Details remain hidden until full-room release or you force release.</li>
+          <li><b>Manage room access:</b> save the custom Room ID/password and optional QR. Details remain hidden until full-room release or you force release; Remove Saved Room Details unpublishes and deletes those credentials without changing registrations.</li>
         </ol>
       </article>
     </div>
@@ -212,7 +215,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261006-final-v6"></script>
-<script src="site.js?v=20261008-date-archive-v1"></script>
+<script src="data.js?v=20261008-variable-cs-v1"></script>
+<script src="site.js?v=20261008-variable-cs-v1"></script>
 </body>
 </html>

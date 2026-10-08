@@ -191,6 +191,22 @@ function battleFormatById(formatId) {
   return (DATA.battleFormats || []).find((format) => format.id === formatId) || (DATA.battleFormats || [])[0];
 }
 
+function csFormatById(formatId) {
+  return (DATA.csFormats || []).find((format) => format.id === formatId) || (DATA.csFormats || []).find((format) => format.id === "squad");
+}
+
+function registrationFormatLabel(entry) {
+  if (!entry) return "";
+  const isCs = entry.mode === "cs" || entry.modeLabel === "Clash Squad" || String(entry.roomId || "").toUpperCase().startsWith("CS-");
+  if (isCs) {
+    const roomLabel = getRoom(entry.roomId)?.formatLabel;
+    const savedLabel = String(entry.formatLabel || "");
+    const validCsLabel = (DATA.csFormats || []).some((format) => format.label === savedLabel);
+    return roomLabel || (validCsLabel ? savedLabel : "Squad · 4v4");
+  }
+  return entry.formatLabel || battleFormatById(entry.format)?.label || entry.format || "";
+}
+
 function entryLabel(room, plural = true) {
   if (!room) return plural ? "entries" : "entry";
   if (room.mode === "cs") return plural ? "teams" : "team";
@@ -199,8 +215,15 @@ function entryLabel(room, plural = true) {
 }
 
 function feeRuleLabel(roomOrFormat) {
-  const playersPerEntry = roomOrFormat?.playersPerEntry || 4;
+  if (roomOrFormat?.mode === "cs") return "per registered side";
+  const playersPerEntry = Number(roomOrFormat?.playersPerEntry || 4);
   return playersPerEntry === 1 ? "per player" : "per team";
+}
+
+function populateCSFormatSelect(select, selectedFormat = "squad") {
+  if (!select) return;
+  const formats = DATA.csFormats || [];
+  select.innerHTML = formats.map((format) => `<option value="${format.id}" ${format.id === selectedFormat ? "selected" : ""}>${escapeHtml(format.label)} · ${format.playersPerEntry} player${format.playersPerEntry === 1 ? "" : "s"} per side</option>`).join("");
 }
 
 function populateFormatSelect(select, selectedFormat = "solo") {
@@ -213,14 +236,16 @@ function populateFormatSelect(select, selectedFormat = "solo") {
 function updateDynamicRoster(form) {
   if (!form) return;
   const room = getRoom(new FormData(form).get("roomId"));
-  const requiredPlayers = form.dataset.mode === "br" ? Number(room?.playersPerEntry || 1) : 4;
+  const requiredPlayers = Number(room?.playersPerEntry || (form.dataset.mode === "cs" ? 4 : 1));
   const rosterHelp = form.querySelector("[data-roster-help]");
   if (rosterHelp) {
     if (form.dataset.mode === "br") {
       const formatLabel = room?.formatLabel || battleFormatById(room?.format)?.label || "selected format";
-      rosterHelp.textContent = `${formatLabel} registration needs ${requiredPlayers} player${requiredPlayers > 1 ? "s" : ""}. Extra player rows are disabled automatically.`;
+      rosterHelp.textContent = `${formatLabel} registration needs ${requiredPlayers} player${requiredPlayers === 1 ? "" : "s"}. Extra player rows are disabled automatically.`;
     } else {
-      rosterHelp.textContent = "Clash Squad registration needs exactly 4 players.";
+      const formatLabel = room?.formatLabel || csFormatById(room?.format)?.label || "selected Clash Squad format";
+      const feeText = room ? `${formatFee(room.fee)} per side/team` : "the selected entry fee per side/team";
+      rosterHelp.textContent = `${formatLabel} needs ${requiredPlayers} player${requiredPlayers === 1 ? "" : "s"} per side. The ${feeText} is the same for every team size. Extra player rows are disabled automatically.`;
     }
   }
   $$("[data-player-row]", form).forEach((row) => {
@@ -328,7 +353,7 @@ function renderHome() {
     summary.innerHTML = `
       <article><strong>${totalBr}</strong><span>Battle Royale player/team slots left</span></article>
       <article><strong>${totalCs}</strong><span>Clash Squad team slots left</span></article>
-      <article><strong>${DATA.economics.roomsPerTier}</strong><span>Custom rooms per fee tier</span></article>
+      <article><strong>${DATA.economics.roomsPerTier}</strong><span>Schedule slots per format</span></article>
       <article><strong>Solo–Squad</strong><span>Battle Royale formats available</span></article>
     `;
   }
@@ -358,7 +383,7 @@ function renderHome() {
           <strong>${formatFee(row.fee)}</strong>
           <span>per entry/team</span>
         </div>
-        <p>${row.brSlots > 0 ? `Battle Royale target reward pool: <b>${formatFee(brProjectedPrize(row.fee))}</b> when lobby conditions are met.` : `Clash Squad tier available from <b>${formatFee(row.fee)}</b>.`} Solo fee is per player; Duo/Trio/Squad and Clash Squad fee is per team.</p>
+        <p>${row.brSlots > 0 ? `Battle Royale target reward pool: <b>${formatFee(brProjectedPrize(row.fee))}</b> when lobby conditions are met.` : `Clash Squad tier available from <b>${formatFee(row.fee)}</b>.`} BR Solo is per player; BR team formats are per team. CS is per side/team, regardless of team size.</p>
         <div class="mini-bars">
           <span>BR slots <b>${row.brSlots}</b></span>
           <span>CS slots <b>${row.csSlots}</b></span>
@@ -376,30 +401,45 @@ function renderHome() {
 function renderClashPage() {
   const params = new URLSearchParams(location.search);
   const defaultFee = Number(params.get("fee")) || getFeeTiers("cs")[0];
+  const defaultFormat = (DATA.csFormats || []).some((format) => format.id === params.get("format")) ? params.get("format") : "squad";
   const tierFilter = $("#cs-tier-filter");
   const variantFilter = $("#cs-variant-filter");
+  const formatFilter = $("#cs-format-filter");
   if (tierFilter) populateFeeSelect(tierFilter, defaultFee, "cs");
   if (variantFilter && !variantFilter.value) variantFilter.value = "Normal";
+  populateCSFormatSelect(formatFilter, defaultFormat);
 
   const formVariant = $("#cs-form-variant");
+  const formFormat = $("#cs-form-format");
+  populateCSFormatSelect(formFormat, defaultFormat);
   const csForm = $('[data-registration-form][data-mode="cs"]');
 
   const rerender = () => {
     const fee = Number(tierFilter?.value || defaultFee);
     const variant = variantFilter?.value || formVariant?.value || "Normal";
+    const format = formatFilter?.value || formFormat?.value || defaultFormat;
     if (formVariant) formVariant.value = variant;
-    renderRoomCards("#cs-room-grid", getRooms({ mode: "cs", fee, variant }));
-    populateRoomSelect("#cs-room-select", getRooms({ mode: "cs", fee, variant }));
-    renderModeStats("#cs-stats", getRooms({ mode: "cs", fee, variant }));
+    if (formFormat) formFormat.value = format;
+    const rooms = getRooms({ mode: "cs", fee, variant, format });
+    renderRoomCards("#cs-room-grid", rooms);
+    populateRoomSelect("#cs-room-select", rooms);
+    renderModeStats("#cs-stats", rooms);
     syncRegistrationSchedule(csForm, "room");
+    updateDynamicRoster(csForm);
     const prize = $("#cs-prize-note");
-    if (prize) prize.textContent = `${variant} Clash Squad ${formatFee(fee)} room: ${DATA.economics.csPrizeNote} Current full-room entry pool is ${formatFee(csProjectedPrize(fee))}.`;
+    const formatInfo = csFormatById(format);
+    if (prize) prize.textContent = `${variant} Clash Squad ${formatInfo?.label || ""} · ${formatFee(fee)} per registered side/team. ${DATA.economics.csPrizeNote}`;
   };
 
   tierFilter?.addEventListener("change", rerender);
   variantFilter?.addEventListener("change", rerender);
+  formatFilter?.addEventListener("change", rerender);
   formVariant?.addEventListener("change", () => {
     if (variantFilter) variantFilter.value = formVariant.value;
+    rerender();
+  });
+  formFormat?.addEventListener("change", () => {
+    if (formatFilter) formatFilter.value = formFormat.value;
     rerender();
   });
   rerender();
@@ -516,7 +556,7 @@ function renderRoomCards(selector, rooms) {
     const left = slotsLeft(room);
     const status = roomStatus(room);
     const percent = Math.round((confirmed / room.capacity) * 100);
-    const modeLabel = room.mode === "br" ? `${room.formatLabel || "Battle Royale"} Battle Royale` : `${room.variant} Clash Squad`;
+    const modeLabel = room.mode === "br" ? `${room.formatLabel || "Battle Royale"} Battle Royale` : `${room.variant} · ${room.formatLabel || "Squad · 4v4"} Clash Squad`;
     const prizeText = room.mode === "br" ? `Target reward ${formatFee(brProjectedPrize(room.fee))}` : `Entry pool ${formatFee(csProjectedPrize(room.fee))}+`;
     const label = entryLabel(room);
     const window = roomScheduleWindow(room);
@@ -672,7 +712,7 @@ function readRegistrationForm(form, mode) {
   const roomId = clean(fd.get("roomId"));
   const room = getRoom(roomId);
   const now = new Date();
-  const requiredPlayers = mode === "br" ? Number(room?.playersPerEntry || 1) : 4;
+  const requiredPlayers = Number(room?.playersPerEntry || (mode === "cs" ? 4 : 1));
   const scheduleSlot = room?.scheduleSlot || clean(fd.get("scheduleSlot")) || "slot1";
   const scheduleWindow = getScheduleWindow(mode, scheduleSlot);
   const iglName = clean(fd.get("iglName")) || clean(fd.get("p1Ign"));
@@ -692,7 +732,7 @@ function readRegistrationForm(form, mode) {
     mode,
     modeLabel: mode === "br" ? "Battle Royale" : "Clash Squad",
     format: room?.format || clean(fd.get("format")),
-    formatLabel: room?.formatLabel || battleFormatById(room?.format || clean(fd.get("format")))?.label || "",
+    formatLabel: room?.formatLabel || (mode === "cs" ? csFormatById(clean(fd.get("format")))?.label : battleFormatById(room?.format || clean(fd.get("format")))?.label) || "",
     playersPerEntry: requiredPlayers,
     roomId,
     roomTitle: room?.title || roomId,
@@ -745,7 +785,7 @@ function generateRegistrationId(mode) {
 
 function buildRegistrationSummary(data) {
   const players = data.players.map((player, index) => `${index + 1}. ${player.ign} | UID: ${player.uid}${player.roll ? ` | Roll: ${player.roll}` : ""}`).join("\n");
-  const modeExtra = data.mode === "br" ? ` (${data.formatLabel || data.format || "Format"})` : (data.variant ? ` (${data.variant})` : "");
+  const modeExtra = data.mode === "br" ? ` (${data.formatLabel || data.format || "Format"})` : ` (${data.formatLabel || "Clash Squad"} · ${data.variant || "Normal"})`;
   return [
     DATA.event.name,
     `Registration ID: ${data.id}`,
@@ -879,7 +919,7 @@ function renderLeaderboardPage() {
     note.textContent = view === "all"
       ? "All-time totals add every saved match date. Match-by-match detail shows the most recent saved session for each entry."
       : view === "date"
-        ? `Showing saved results for ${formatIsoDate(leaderboardDateSelection())}.`
+        ? `Showing the leaderboard for ${formatIsoDate(leaderboardDateSelection())}. If no verified results were published on that date, the relevant mode will show a clear notice.`
         : "Showing each mode’s latest saved match date. Use the date picker or saved-date list to browse earlier results.";
   }
   renderLeaderboards("#br-leaderboard", "br");
@@ -895,7 +935,7 @@ function getApprovedTeamRows(mode) {
       mode: reg.mode,
       modeLabel: reg.modeLabel,
       format: reg.format,
-      formatLabel: reg.formatLabel,
+      formatLabel: registrationFormatLabel(reg),
       variant: reg.variant,
       roomId: reg.roomId,
       roomTitle: reg.roomTitle,
@@ -978,8 +1018,8 @@ function renderLeaderboards(selector, mode) {
   });
 
   if (!rows.length) {
-    const title = view === "date" ? `No ${mode === "br" ? "Battle Royale" : "Clash Squad"} results saved for ${formatIsoDate(leaderboardDateSelection())}` : `No approved ${mode === "br" ? "Battle Royale" : "Clash Squad"} teams yet`;
-    const message = view === "date" ? "Choose another saved date, or ask the organizer whether results for this day have been published." : "Once the organizer approves an entry, its slot and team name will appear here. Verified match results are published after review.";
+    const title = view === "date" ? `No ${mode === "br" ? "Battle Royale" : "Clash Squad"} leaderboard available for ${formatIsoDate(leaderboardDateSelection())}` : `No approved ${mode === "br" ? "Battle Royale" : "Clash Squad"} teams yet`;
+    const message = view === "date" ? "No verified results have been published for this mode on the selected date. Choose another date or check back after the organizer publishes results." : "Once the organizer approves an entry, its slot and team name will appear here. Verified match results are published after review.";
     container.innerHTML = `<div class="empty-state"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(message)}</p></div>`;
     return;
   }
@@ -993,7 +1033,7 @@ function renderLeaderboards(selector, mode) {
       previousRankKey = rankKey;
     }
     const displayedRank = row._score === null ? "—" : rank;
-    const format = mode === "br" ? (row.formatLabel || row.format || "Battle Royale") : (row.variant || "Clash Squad");
+    const format = mode === "br" ? (registrationFormatLabel(row) || "Battle Royale") : `${registrationFormatLabel(row)} · ${row.variant || "Clash Squad"}`;
     const roster = (row.players || []).filter(Boolean).join(", ") || "Roster submitted";
     const cumulative = row._score === null ? "Awaiting score" : row._score;
     const matchDateLabel = row.allTimeDays ? `All-time · ${row.allTimeDays} date${row.allTimeDays === 1 ? "" : "s"} · latest ${formatIsoDate(row.matchDate || row.date)}` : formatIsoDate(row.matchDate || row.date);
@@ -1081,7 +1121,7 @@ async function renderDashboardData() {
   const table = $("#dashboard-registrations");
   if (table) {
     const regs = summary.registrations || [];
-    table.innerHTML = regs.length ? `<div class="table-wrap"><table><thead><tr><th>Status</th><th>Slot</th><th>ID</th><th>Mode</th><th>Format</th><th>Match time</th><th>Room</th><th>Entry/Team</th><th>IGL/Player</th><th>Player details</th><th>WhatsApp</th><th>Fee</th><th>Payment</th></tr></thead><tbody>${regs.map((r) => `<tr><td>${registrationStatusBadge(r.status)}</td><td>${slotLabel(r)}</td><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(r.formatLabel || r.variant || "-")}</td><td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.iglName || r.captainName)}</td><td>${playerListHtml(r)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatFee(r.fee)}</td><td>${escapeHtml(r.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><h3>No registrations yet</h3><p>Registrations will appear live here.</p></div>`;
+    table.innerHTML = regs.length ? `<div class="table-wrap"><table><thead><tr><th>Status</th><th>Slot</th><th>ID</th><th>Mode</th><th>Format</th><th>Match time</th><th>Room</th><th>Entry/Team</th><th>IGL/Player</th><th>Player details</th><th>WhatsApp</th><th>Fee</th><th>Payment</th></tr></thead><tbody>${regs.map((r) => `<tr><td>${registrationStatusBadge(r.status)}</td><td>${slotLabel(r)}</td><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(registrationFormatLabel(r) || r.variant || "-")}</td><td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.iglName || r.captainName)}</td><td>${playerListHtml(r)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatFee(r.fee)}</td><td>${escapeHtml(r.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><h3>No registrations yet</h3><p>Registrations will appear live here.</p></div>`;
   }
 }
 
@@ -1153,7 +1193,7 @@ async function checkStatusBySlot() {
         slotNumber: reg.slotNumber,
         slotCapacity: reg.slotCapacity || getRoom(reg.roomId)?.capacity || 12,
         modeLabel: reg.modeLabel,
-        formatLabel: reg.formatLabel,
+        formatLabel: registrationFormatLabel(reg),
         variant: reg.variant,
         scheduleSlotLabel: reg.scheduleSlotLabel,
         scheduleTime: reg.scheduleTime
@@ -1181,7 +1221,7 @@ function renderStatusResult(result) {
     <article class="room-card ${cls}">
       <div class="room-card-head"><span class="status-pill ${cls}">${escapeHtml(status)}</span><b>${escapeHtml(slotText)}</b></div>
       <h3>${escapeHtml(result.teamName || "Tournament entry")}</h3>
-      <p>${escapeHtml(result.modeLabel || "")} ${result.formatLabel || result.variant ? `· ${escapeHtml(result.formatLabel || result.variant)}` : ""}</p>
+      <p>${escapeHtml(result.modeLabel || "")} ${registrationFormatLabel(result) || result.variant ? `· ${escapeHtml(registrationFormatLabel(result) || result.variant)}` : ""}</p>
       <div class="note-box"><p><b>Lobby:</b> ${escapeHtml(result.roomTitle || result.roomId || "-")}</p><p><b>Match time:</b> ${escapeHtml(result.scheduleTime || result.scheduleSlotLabel || "To be announced")}</p><p>${escapeHtml(statusMessage)}</p></div>
     </article>
   `;
@@ -1322,8 +1362,12 @@ function renderAdminCalendar(registrations = []) {
   if (monthInput.dataset.bound !== "true") {
     monthInput.dataset.bound = "true";
     monthInput.addEventListener("change", () => {
-      ADMIN_CALENDAR_SELECTED_DATE = "";
+      const resultDate = $("#admin-result-date")?.value || "";
+      ADMIN_CALENDAR_SELECTED_DATE = resultDate.startsWith(`${monthInput.value}-`) ? resultDate : `${monthInput.value}-01`;
+      const resultInput = $("#admin-result-date");
+      if (resultInput) resultInput.value = ADMIN_CALENDAR_SELECTED_DATE;
       renderAdminCalendar(ADMIN_REGISTRATIONS);
+      renderFinalScoreTable();
     });
   }
   const [year, month] = monthInput.value.split("-").map(Number);
@@ -1337,13 +1381,23 @@ function renderAdminCalendar(registrations = []) {
     if (!registrationsByDate.has(key)) registrationsByDate.set(key, []);
     registrationsByDate.get(key).push(reg);
   });
+  const resultsByDate = new Map();
+  (ADMIN_SUMMARY?.matchHistory || []).forEach((row) => {
+    const key = String(row?.date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+    if (!resultsByDate.has(key)) resultsByDate.set(key, []);
+    resultsByDate.get(key).push(row);
+  });
   const monthKey = monthInput.value;
   const daysWithRegistrations = [...counts.keys()].filter((key) => key.startsWith(`${monthKey}-`)).sort();
   if (!ADMIN_CALENDAR_SELECTED_DATE.startsWith(`${monthKey}-`)) {
-    ADMIN_CALENDAR_SELECTED_DATE = daysWithRegistrations[0] || `${monthKey}-01`;
+    const resultDate = $("#admin-result-date")?.value || "";
+    ADMIN_CALENDAR_SELECTED_DATE = resultDate.startsWith(`${monthKey}-`) ? resultDate : (daysWithRegistrations[0] || `${monthKey}-01`);
   }
   const totalInMonth = daysWithRegistrations.reduce((sum, key) => sum + counts.get(key), 0);
-  if (summary) summary.textContent = `${totalInMonth} registration${totalInMonth === 1 ? "" : "s"} across ${daysWithRegistrations.length} active date${daysWithRegistrations.length === 1 ? "" : "s"}. Dates use India Standard Time.`;
+  const savedResultDates = [...resultsByDate.keys()].filter((key) => key.startsWith(`${monthKey}-`));
+  const totalResultsInMonth = savedResultDates.reduce((sum, key) => sum + resultsByDate.get(key).length, 0);
+  if (summary) summary.textContent = `${totalInMonth} registration${totalInMonth === 1 ? "" : "s"} across ${daysWithRegistrations.length} active registration date${daysWithRegistrations.length === 1 ? "" : "s"}; ${totalResultsInMonth} saved leaderboard result${totalResultsInMonth === 1 ? "" : "s"}. Select any calendar day. Each day shows registration and saved leaderboard-result counts.`;
   const weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const firstDayOffset = (new Date(year, month - 1, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -1352,23 +1406,35 @@ function renderAdminCalendar(registrations = []) {
     const day = index + 1;
     const key = `${monthKey}-${String(day).padStart(2, "0")}`;
     const count = Number(counts.get(key) || 0);
+    const resultCount = (resultsByDate.get(key) || []).length;
     const selected = key === ADMIN_CALENDAR_SELECTED_DATE;
-    return `<button type="button" class="calendar-day ${count ? "has-registrations" : ""} ${selected ? "selected" : ""}" data-calendar-date="${key}" ${count ? "" : "disabled"} aria-label="${formatIsoDate(key)}: ${count} registration${count === 1 ? "" : "s"}"><span>${day}</span><small>${count || "·"}</small></button>`;
+    return `<button type="button" class="calendar-day ${count ? "has-registrations" : ""} ${resultCount ? "has-results" : ""} ${selected ? "selected" : ""}" data-calendar-date="${key}" aria-label="${formatIsoDate(key)}: ${count} registration${count === 1 ? "" : "s"}; ${resultCount} leaderboard result${resultCount === 1 ? "" : "s"}"><span>${day}</span><small>${count} reg · ${resultCount} LB</small></button>`;
   }).join("");
   calendar.innerHTML = `<div class="calendar-weekdays">${weekdayNames.map((name) => `<span>${name}</span>`).join("")}</div><div class="calendar-days">${blanks}${dayButtons}</div>`;
   $$('[data-calendar-date]', calendar).forEach((button) => button.addEventListener("click", () => {
     ADMIN_CALENDAR_SELECTED_DATE = button.dataset.calendarDate || "";
+    const resultInput = $("#admin-result-date");
+    if (resultInput) resultInput.value = ADMIN_CALENDAR_SELECTED_DATE;
     renderAdminCalendar(ADMIN_REGISTRATIONS);
+    renderFinalScoreTable();
   }));
   if (dayDetails) {
     const selectedRows = registrationsByDate.get(ADMIN_CALENDAR_SELECTED_DATE) || [];
+    const resultRows = resultsByDate.get(ADMIN_CALENDAR_SELECTED_DATE) || [];
     const dateTitle = formatIsoDate(ADMIN_CALENDAR_SELECTED_DATE);
-    dayDetails.innerHTML = selectedRows.length
-      ? `<h3>${escapeHtml(dateTitle)} · ${selectedRows.length} registration${selectedRows.length === 1 ? "" : "s"}</h3><div class="table-wrap"><table><thead><tr><th>Status</th><th>Submitted time (IST)</th><th>Slot</th><th>Mode / format</th><th>Entry / team</th><th>Roster</th><th>Room</th><th>Contact</th><th>Payment ref</th></tr></thead><tbody>${selectedRows.map((reg) => `<tr><td>${registrationStatusBadge(reg.status)}</td><td>${escapeHtml(registrationTimeLabel(reg))}</td><td>${slotLabel(reg)}</td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(reg.formatLabel || reg.variant || "-")}</td><td>${escapeHtml(reg.teamName || "-")}</td><td>${playerListHtml(reg)}</td><td>${escapeHtml(reg.roomId || "-")}</td><td>${escapeHtml(reg.whatsapp || "-")}</td><td>${escapeHtml(reg.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>`
-      : `<div class="empty-state"><h3>${escapeHtml(dateTitle)}</h3><p>No registrations were received on this date.</p></div>`;
+    const resultBreakdown = { br: resultRows.filter((row) => row.mode === "br").length, cs: resultRows.filter((row) => row.mode === "cs").length };
+    const resultsStatus = resultRows.length
+      ? `<p class="calendar-result-available"><b>Leaderboard:</b> ${resultRows.length} saved result${resultRows.length === 1 ? "" : "s"} (${resultBreakdown.br} BR, ${resultBreakdown.cs} CS). This date is selected for result entry below.</p>`
+      : `<p class="calendar-result-empty"><b>Leaderboard:</b> No results have been published for this date. Enter approved-team scores below to create its leaderboard.</p>`;
+    const registrationsStatus = selectedRows.length
+      ? `<p><b>Registrations:</b> ${selectedRows.length} submitted on this date.</p>`
+      : `<p class="calendar-result-empty"><b>Registrations:</b> No registrations were received on this date.</p>`;
+    const table = selectedRows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Status</th><th>Submitted time (IST)</th><th>Slot</th><th>Mode / format</th><th>Entry / team</th><th>Roster</th><th>Room</th><th>Contact</th><th>Payment ref</th></tr></thead><tbody>${selectedRows.map((reg) => `<tr><td>${registrationStatusBadge(reg.status)}</td><td>${escapeHtml(registrationTimeLabel(reg))}</td><td>${slotLabel(reg)}</td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(registrationFormatLabel(reg) || reg.variant || "-")}</td><td>${escapeHtml(reg.teamName || "-")}</td><td>${playerListHtml(reg)}</td><td>${escapeHtml(reg.roomId || "-")}</td><td>${escapeHtml(reg.whatsapp || "-")}</td><td>${escapeHtml(reg.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty-state compact-empty"><h3>No registrations for this date</h3><p>Entries submitted on this day will appear here.</p></div>`;
+    dayDetails.innerHTML = `<h3>${escapeHtml(dateTitle)}</h3><div class="calendar-date-status" role="status">${registrationsStatus}${resultsStatus}<p class="disclaimer">The match date field below is set to ${escapeHtml(dateTitle)}.</p></div>${table}`;
   }
 }
-
 function populateAdminSettingsFromSummary(summary = {}) {
   const settings = summary.scheduleSettings || { br: { startTime: "21:00", durationHours: 1, gapHours: 0 }, cs: { startTime: "21:00", durationHours: 1, gapHours: 0 } };
   ["br", "cs"].forEach((mode) => {
@@ -1432,10 +1498,11 @@ function setupAdminListeners() {
   $("#admin-mode")?.addEventListener("change", () => { const mode = $("#admin-mode")?.value || "br"; populateFeeSelect($("#admin-fee"), getFeeTiers(mode)[0], mode); updateAdminRoomChoices(); });
   $("#admin-fee")?.addEventListener("change", updateAdminRoomChoices);
   $("#admin-format")?.addEventListener("change", updateAdminRoomChoices);
+  $("#admin-cs-format")?.addEventListener("change", updateAdminRoomChoices);
   $("#admin-variant")?.addEventListener("change", updateAdminRoomChoices);
   $("#save-room-count")?.addEventListener("click", saveAdminRoomCount);
   $("#save-final-scores")?.addEventListener("click", saveFinalScores);
-  $("#admin-result-date")?.addEventListener("change", renderFinalScoreTable);
+  $("#admin-result-date")?.addEventListener("change", handleAdminResultDateChange);
   $("#save-leaderboard-settings")?.addEventListener("click", saveLeaderboardSettings);
   $("#export-registrations")?.addEventListener("click", exportRegistrationsCsv);
   $("#clear-registrations")?.addEventListener("click", clearRegistrations);
@@ -1445,8 +1512,10 @@ function setupAdminListeners() {
   $("#room-share-mode")?.addEventListener("change", updateRoomShareChoices);
   $("#room-share-fee")?.addEventListener("change", updateRoomShareChoices);
   $("#room-share-format")?.addEventListener("change", updateRoomShareChoices);
+  $("#room-share-cs-format")?.addEventListener("change", updateRoomShareChoices);
   $("#room-share-variant")?.addEventListener("change", updateRoomShareChoices);
   $("#save-room-details")?.addEventListener("click", saveRoomDetails);
+  $("#delete-room-details")?.addEventListener("click", removeRoomDetails);
   $("#save-schedule-settings")?.addEventListener("click", saveScheduleSettings);
   $("#save-payment-settings")?.addEventListener("click", savePaymentSettings);
   ["#br-start-time", "#br-duration", "#br-gap", "#cs-start-time", "#cs-duration", "#cs-gap"].forEach((selector) => $(selector)?.addEventListener("change", updateAdminSchedulePreview));
@@ -1463,6 +1532,7 @@ function setupAdminListeners() {
 function renderAdminPanel() {
   populateFeeSelect($("#admin-fee"), getFeeTiers("br")[0], "br");
   populateFormatSelect($("#admin-format"), "solo");
+  populateCSFormatSelect($("#admin-cs-format"), "squad");
   updateAdminRoomChoices();
   updateRoomShareChoices();
   populateAdminSettingsFromSummary(ADMIN_SUMMARY || {});
@@ -1474,15 +1544,18 @@ function updateAdminRoomChoices() {
   const fee = Number($("#admin-fee")?.value || getFeeTiers(mode)[0]);
   const variantWrap = $("#admin-variant-wrap");
   const formatWrap = $("#admin-format-wrap");
+  const csFormatWrap = $("#admin-cs-format-wrap");
   const variant = $("#admin-variant")?.value || "Normal";
   const format = $("#admin-format")?.value || "solo";
+  const csFormat = $("#admin-cs-format")?.value || "squad";
   if (variantWrap) variantWrap.classList.toggle("hidden", mode !== "cs");
   if (formatWrap) formatWrap.classList.toggle("hidden", mode !== "br");
+  if (csFormatWrap) csFormatWrap.classList.toggle("hidden", mode !== "cs");
   const rooms = getRooms({
     mode,
     fee,
     variant: mode === "cs" ? variant : undefined,
-    format: mode === "br" ? format : undefined
+    format: mode === "cs" ? csFormat : format
   });
   const select = $("#admin-room");
   if (!select) return;
@@ -1526,15 +1599,19 @@ async function saveAdminRoomCount() {
 function updateRoomShareChoices() {
   populateFeeSelect($("#room-share-fee"), Number($("#room-share-fee")?.value || getFeeTiers("br")[0]), $("#room-share-mode")?.value || "br");
   populateFormatSelect($("#room-share-format"), $("#room-share-format")?.value || "solo");
+  populateCSFormatSelect($("#room-share-cs-format"), $("#room-share-cs-format")?.value || "squad");
   const mode = $("#room-share-mode")?.value || "br";
   const fee = Number($("#room-share-fee")?.value || getFeeTiers(mode)[0]);
   const formatWrap = $("#room-share-format-wrap");
+  const csFormatWrap = $("#room-share-cs-format-wrap");
   const variantWrap = $("#room-share-variant-wrap");
   const format = $("#room-share-format")?.value || "solo";
+  const csFormat = $("#room-share-cs-format")?.value || "squad";
   const variant = $("#room-share-variant")?.value || "Normal";
   formatWrap?.classList.toggle("hidden", mode !== "br");
+  csFormatWrap?.classList.toggle("hidden", mode !== "cs");
   variantWrap?.classList.toggle("hidden", mode !== "cs");
-  const rooms = getRooms({ mode, fee, format: mode === "br" ? format : undefined, variant: mode === "cs" ? variant : undefined });
+  const rooms = getRooms({ mode, fee, format: mode === "br" ? format : csFormat, variant: mode === "cs" ? variant : undefined });
   const select = $("#room-share-room");
   if (!select) return;
   const previousRoom = select.value;
@@ -1620,6 +1697,34 @@ async function saveRoomDetails() {
     renderRoomDetailsPage();
   } catch (error) {
     toast(error.message || "Could not save room details.", true);
+  }
+}
+
+async function removeRoomDetails() {
+  const roomId = $("#room-share-room")?.value;
+  if (!roomId) return toast("Select a website room first.", true);
+  const details = ADMIN_SUMMARY?.roomDetails || loadState().roomDetails || {};
+  if (!details[roomId]) return toast("No saved room details exist for this lobby.");
+  const room = getRoom(roomId);
+  if (!confirm(`Remove saved room ID, password, and QR for ${room?.title || roomId}? This will hide them from the public Room Details page. Registrations will not be changed.`)) return;
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/delete-room-details", { pin: currentAdminPin, roomId });
+      await refreshStateFromServer();
+      await renderAdminTables();
+      renderPage();
+      showAdminConfirmation("Room details removed");
+      return;
+    }
+    const state = loadState();
+    delete state.roomDetails[roomId];
+    saveState(state);
+    ADMIN_SUMMARY = { ...(ADMIN_SUMMARY || {}), roomDetails: state.roomDetails };
+    loadRoomDetailAdminFields();
+    renderRoomDetailsPage();
+    showAdminConfirmation("Room details removed on this device");
+  } catch (error) {
+    toast(error.message || "Could not remove room details.", true);
   }
 }
 
@@ -1775,7 +1880,7 @@ async function renderAdminTables() {
           </td>
           <td>${escapeHtml(r.id)}</td>
           <td>${escapeHtml(r.modeLabel)}</td>
-          <td>${escapeHtml(r.formatLabel || r.variant || "-")}</td>
+          <td>${escapeHtml(registrationFormatLabel(r) || r.variant || "-")}</td>
           <td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td>
           <td>${escapeHtml(r.roomId)}</td>
           <td>${escapeHtml(r.teamName)}</td>
@@ -1884,6 +1989,15 @@ async function deleteRegistration(registrationId) {
   }
 }
 
+function handleAdminResultDateChange() {
+  const value = $("#admin-result-date")?.value || todayDateIST();
+  ADMIN_CALENDAR_SELECTED_DATE = value;
+  const monthInput = $("#registration-calendar-month");
+  if (monthInput && value.length >= 7 && monthInput.value !== value.slice(0, 7)) monthInput.value = value.slice(0, 7);
+  renderAdminCalendar(ADMIN_REGISTRATIONS);
+  renderFinalScoreTable();
+}
+
 function renderFinalScoreTable() {
   const box = $("#final-score-table");
   if (!box) return;
@@ -1913,7 +2027,7 @@ function renderFinalScoreTable() {
       return `<fieldset class="br-match-input"><legend>Match ${index + 1}</legend><label>Kills<input class="score-input" type="number" min="0" max="99" step="1" inputmode="numeric" data-match-kills="${escapeHtml(reg.id)}" data-match-index="${index}" value="${match.kills ?? ""}" aria-label="Kills in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}" /></label><label>Placement<select data-match-position="${escapeHtml(reg.id)}" data-match-index="${index}" aria-label="Placement in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}">${positionOptions}</select></label></fieldset>`;
     }).join("")}</div>` : `<div class="cs-score-editor"><label>Match result<select data-cs-outcome="${escapeHtml(reg.id)}"><option value="" ${!csResult.outcome ? "selected" : ""}>Not entered</option><option value="Win" ${csResult.outcome === "Win" ? "selected" : ""}>Win · 3 points</option><option value="Loss" ${csResult.outcome === "Loss" ? "selected" : ""}>Loss · 0 points</option></select></label><label>Round difference<input class="score-input" type="number" min="-99" max="99" step="1" data-cs-round-diff="${escapeHtml(reg.id)}" value="${csResult.roundDiff ?? ""}" placeholder="e.g. 3 or -2" /></label></div>`;
     const datePoints = saved || legacyCurrent ? (resultSource.finalScore ?? "—") : "—";
-    return `<tr><td><b>${slotLabel(reg)}</b></td><td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(reg.formatLabel || reg.variant || "-")}<br><small>${escapeHtml(reg.scheduleTime || "")}</small></td><td>${resultControl}</td><td><b>${escapeHtml(datePoints)}</b></td></tr>`;
+    return `<tr><td><b>${slotLabel(reg)}</b></td><td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(registrationFormatLabel(reg) || reg.variant || "-")}<br><small>${escapeHtml(reg.scheduleTime || "")}</small></td><td>${resultControl}</td><td><b>${escapeHtml(datePoints)}</b></td></tr>`;
   }).join("");
   box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Slot</th><th>Entry / roster</th><th>Mode · time</th><th>Verified result inputs · ${escapeHtml(formatIsoDate(matchDate))}</th><th>Date points</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -1989,7 +2103,7 @@ async function saveFinalScores() {
         teamName: reg.teamName,
         modeLabel: reg.modeLabel,
         format: reg.format,
-        formatLabel: reg.formatLabel,
+        formatLabel: registrationFormatLabel(reg),
         variant: reg.variant,
         roomId: reg.roomId,
         roomTitle: reg.roomTitle,
@@ -2099,7 +2213,7 @@ async function exportRegistrationsCsv() {
   const headers = ["id", "status", "slotNumber", "mode", "formatOrType", "playersPerEntry", "scheduleTime", "roomId", "fee", "feeRule", "teamName", "finalScore", "iglName", "iglUid", "whatsapp", "paymentRef", "submittedAt", "p1Name", "p1Uid", "p2Name", "p2Uid", "p3Name", "p3Uid", "p4Name", "p4Uid"];
   const rows = state.registrations.map((r) => {
     const flat = {
-      id: r.id, status: r.status, slotNumber: r.slotNumber, mode: r.modeLabel, formatOrType: r.formatLabel || r.variant || "", playersPerEntry: r.playersPerEntry || "", scheduleTime: r.scheduleTime || r.scheduleSlotLabel || "", roomId: r.roomId, fee: r.fee, feeRule: r.feeRule || "", teamName: r.teamName, finalScore: r.finalScore ?? "", iglName: r.iglName || r.captainName, iglUid: r.iglUid || r.players?.[0]?.uid, whatsapp: r.whatsapp, paymentRef: r.paymentRef, submittedAt: r.submittedAt,
+      id: r.id, status: r.status, slotNumber: r.slotNumber, mode: r.modeLabel, formatOrType: registrationFormatLabel(r) || r.variant || "", playersPerEntry: r.playersPerEntry || "", scheduleTime: r.scheduleTime || r.scheduleSlotLabel || "", roomId: r.roomId, fee: r.fee, feeRule: r.feeRule || "", teamName: r.teamName, finalScore: r.finalScore ?? "", iglName: r.iglName || r.captainName, iglUid: r.iglUid || r.players?.[0]?.uid, whatsapp: r.whatsapp, paymentRef: r.paymentRef, submittedAt: r.submittedAt,
       p1Name: r.players?.[0]?.ign, p1Uid: r.players?.[0]?.uid, p2Name: r.players?.[1]?.ign, p2Uid: r.players?.[1]?.uid, p3Name: r.players?.[2]?.ign, p3Uid: r.players?.[2]?.uid, p4Name: r.players?.[3]?.ign, p4Uid: r.players?.[3]?.uid
     };
     return headers.map((h) => csvEscape(flat[h])).join(",");

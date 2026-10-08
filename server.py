@@ -178,6 +178,33 @@ def _load_state_locked():
         "qrDataUrl": payment.get("qrDataUrl") if valid_image_data_url(payment.get("qrDataUrl")) else "",
     }
     changed = False
+    for reg in base["registrations"]:
+        if room_mode(reg.get("roomId"), reg.get("mode")) != "cs":
+            continue
+        cs_format = cs_format_from_room_id(reg.get("roomId"))
+        if reg.get("format") != cs_format.lower():
+            reg["format"] = cs_format.lower()
+            changed = True
+        if reg.get("formatLabel") not in CS_FORMAT_LABELS.values():
+            reg["formatLabel"] = CS_FORMAT_LABELS[cs_format]
+            changed = True
+        if not reg.get("playersPerEntry"):
+            players = reg.get("players") if isinstance(reg.get("players"), list) else []
+            reg["playersPerEntry"] = len(players) or CS_FORMAT_PLAYERS[cs_format]
+            changed = True
+        if reg.get("feeRule") != "per registered side":
+            reg["feeRule"] = "per registered side"
+            changed = True
+    for row in base["matchHistory"]:
+        if row.get("mode") != "cs" and not str(row.get("roomId") or "").upper().startswith("CS-"):
+            continue
+        cs_format = cs_format_from_room_id(row.get("roomId"))
+        if row.get("format") != cs_format.lower():
+            row["format"] = cs_format.lower()
+            changed = True
+        if row.get("formatLabel") not in CS_FORMAT_LABELS.values():
+            row["formatLabel"] = CS_FORMAT_LABELS[cs_format]
+            changed = True
     known_history = {(str(row.get("registrationId") or ""), row.get("date")) for row in base["matchHistory"]}
     for reg in base["registrations"]:
         registration_id = str(reg.get("id") or "")
@@ -305,6 +332,18 @@ def payment_is_reported(payment_ref):
     return not any(word in text for word in pending_words)
 
 
+CS_FORMAT_PLAYERS = {"SOLO": 1, "DUO": 2, "TRIO": 3, "SQUAD": 4}
+CS_FORMAT_LABELS = {"SOLO": "Solo · 1v1", "DUO": "Duo · 2v2", "TRIO": "Trio · 3v3", "SQUAD": "Squad · 4v4"}
+
+
+def cs_format_from_room_id(room_id):
+    parts = str(room_id or "").upper().split("-")
+    # New size-specific rooms use CS-NM-SOLO-50-1; existing CS-NM-50-1 IDs remain 4v4.
+    if len(parts) >= 5 and parts[0] == "CS" and parts[2] in CS_FORMAT_PLAYERS:
+        return parts[2]
+    return "SQUAD"
+
+
 def room_capacity(room_id):
     return 2 if str(room_id or "").upper().startswith("CS-") else 12
 
@@ -418,7 +457,10 @@ def public_registration_status(reg):
         "slotNumber": reg.get("slotNumber"),
         "slotCapacity": room_capacity(reg.get("roomId")),
         "modeLabel": reg.get("modeLabel"),
+        "format": reg.get("format"),
         "formatLabel": reg.get("formatLabel"),
+        "playersPerEntry": reg.get("playersPerEntry"),
+        "feeRule": reg.get("feeRule"),
         "variant": reg.get("variant"),
         "scheduleSlotLabel": reg.get("scheduleSlotLabel"),
         "scheduleTime": reg.get("scheduleTime"),
@@ -669,6 +711,33 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "This registration was already submitted."}, 409)
                 return
             mode = room_mode(reg.get("roomId"), reg.get("mode"))
+            if mode == "cs":
+                cs_format = cs_format_from_room_id(reg.get("roomId"))
+                required_players = CS_FORMAT_PLAYERS[cs_format]
+                players = reg.get("players") if isinstance(reg.get("players"), list) else []
+                try:
+                    submitted_player_count = int(reg.get("playersPerEntry") or len(players))
+                except (TypeError, ValueError):
+                    submitted_player_count = 0
+                if submitted_player_count != required_players or len(players) != required_players:
+                    self.send_json({"ok": False, "error": f"This {CS_FORMAT_LABELS[cs_format]} Clash Squad room requires exactly {required_players} player{'s' if required_players != 1 else ''} per side."}, 400)
+                    return
+                normalized_players = []
+                for index, player in enumerate(players, start=1):
+                    if not isinstance(player, dict):
+                        self.send_json({"ok": False, "error": f"Enter valid player details for Player {index}."}, 400)
+                        return
+                    ign = normalize_name(player.get("ign"), 80)
+                    uid = str(player.get("uid") or "").strip()
+                    if not ign or not re.fullmatch(r"\d{6,15}", uid):
+                        self.send_json({"ok": False, "error": f"Enter a valid IGN and numeric Free Fire ID for Player {index}."}, 400)
+                        return
+                    normalized_players.append({"ign": ign, "uid": uid})
+                reg["players"] = normalized_players
+                reg["playersPerEntry"] = required_players
+                reg["format"] = cs_format.lower()
+                reg["formatLabel"] = CS_FORMAT_LABELS[cs_format]
+                reg["feeRule"] = "per registered side"
             schedule_key = f"slot{room_slot_index(reg.get('roomId'))}"
             window = next((item for item in schedule_windows(state.get("scheduleSettings"))[mode] if item["id"] == schedule_key), None)
             if not window:
@@ -1061,7 +1130,23 @@ class Handler(SimpleHTTPRequestHandler):
             detail["updatedAt"] = now_iso()
             state.setdefault("roomDetails", {})[room_id] = detail
             save_state(state)
-            self.send_json({"ok": True, "state": public_state(state)})
+            self.send_json({"ok": True, "state": public_state(state), **admin_summary(state)})
+            return
+
+        if path == "/api/admin/delete-room-details":
+            if not self.require_pin(payload):
+                return
+            room_id = str(payload.get("roomId") or "").strip()
+            room_details = state.setdefault("roomDetails", {})
+            if not room_id:
+                self.send_json({"ok": False, "error": "Select a website room."}, 400)
+                return
+            if room_id not in room_details:
+                self.send_json({"ok": False, "error": "No saved room details exist for this lobby."}, 404)
+                return
+            del room_details[room_id]
+            save_state(state)
+            self.send_json({"ok": True, "message": "Saved room details removed.", "state": public_state(state), **admin_summary(state)})
             return
 
         self.send_json({"ok": False, "error": "Unknown API endpoint"}, 404)

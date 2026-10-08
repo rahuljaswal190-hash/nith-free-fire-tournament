@@ -1,4 +1,4 @@
-# NIT Hamirpur Free Fire Tournament — Dated Results & Durable Storage Update
+# NIT Hamirpur Free Fire Tournament — Variable CS Formats & Date Controls
 
 A mobile-first website for a **student-organized** Free Fire tournament around NIT Hamirpur. The site does not claim institute, Garena, or Free Fire approval or endorsement.
 
@@ -6,7 +6,7 @@ A mobile-first website for a **student-organized** Free Fire tournament around N
 
 - `index.html` — event overview and live availability
 - `battle-royale.html` — Solo, Duo, Trio, Squad registrations and BR sessions
-- `clash-squad.html` — Normal and One Tap CS registrations
+- `clash-squad.html` — Normal and One Tap Clash Squad registrations in 1v1, 2v2, 3v3 and 4v4 sizes
 - `schedule-results.html` — separate BR/CS slot schedules and event flow
 - `leaderboard.html` — latest, selected-date, and all-time standings
 - `status-check.html` — registration status by selected room and assigned slot
@@ -20,10 +20,10 @@ A mobile-first website for a **student-organized** Free Fire tournament around N
 
 - Battle Royale fee tiers: **₹20, ₹40, ₹60, ₹80, ₹100**
 - Clash Squad fee tiers: **₹50, ₹70, ₹90, ₹110**
-- Three time-linked slots are available for each mode. A fee tier has **3 rooms**, one for each slot; there is no five-room/five-match schedule.
+- Three time-linked slots are available for each mode. There is no five-slot/five-match schedule.
 - BR has Solo, Duo, Trio and Squad formats. Each BR room holds up to **12 entries/teams** (slots 1–12) and plays **3 matches** in its assigned session.
-- CS has Normal and One Tap types. Each CS room holds **2 teams** and plays **1 match**; the winner earns 3 leaderboard points.
-- Solo BR entry fee is per player. Duo, Trio, Squad and CS fees are per team.
+- CS has Normal and One Tap types, each offered as **Solo 1v1, Duo 2v2, Trio 3v3, and Squad 4v4**. Each size/type/fee has one room in each of the 3 time slots; each room holds **2 sides of the same size** and plays **1 match**. The winner earns 3 leaderboard points.
+- BR Solo fee is per player; BR Duo, Trio and Squad fees are per team. CS fees are charged once per registered side/team, regardless of team size.
 
 ## Run locally or on a Python host
 
@@ -68,10 +68,11 @@ For other hosts, point `TOURNAMENT_DATA_DIR` at the host’s persistent mounted 
 3. **Publish payment details:** upload an optional PNG/JPG/WebP payment QR (maximum 1 MB), enter an optional payee name and/or UPI ID, and add instructions. Payment details remain in server state until an admin changes or removes them. Their survival across host restarts still depends on the persistent-storage setup above.
 4. **Verify a registration:** review the submitted UTR/reference and manually confirm payment. QR/UPI instructions do **not** provide automatic payment verification; entries stay pending until the organizer approves them.
 5. **Edit or remove registrations:** “Edit names” lets the admin correct the entry/team and roster IGN names, including emoji and symbol names. Teammates can be removed from the roster. “Remove” deletes the registration and releases its slot.
-6. **Use the registration calendar:** choose a month and click a day with registrations to inspect that day’s entries. Dates and counts use India Standard Time.
-7. **Publish dated results:** choose a match date, then enter BR kills and placement (1–12) for each of the 3 matches or CS Win/Loss and round difference. Results are archived by date. Re-saving a past date updates only that date and does not replace a newer match result. BR points are kills plus the placement points in `data.js`; CS wins = 3 points, losses = 0.
-8. **Choose the public default:** select either the latest saved match date or all-time cumulative standings. Players can still choose a particular saved date (including earlier dates) on the public leaderboard.
-9. **Read save confirmations:** successful admin actions show a compact auto-dismiss toast for about 2.5 seconds. Failed saves show an error toast and do not show a success confirmation.
+6. **Use the registration calendar:** choose a month and click any day, including a date with no registrations. Registration counts and saved leaderboard-result counts are shown separately; date-specific empty states are displayed. Calendar selection also updates the result-entry date. Dates use India Standard Time.
+7. **Publish dated results:** select any match date, then enter BR kills and placement (1–12) for each of the 3 matches or CS Win/Loss and round difference. Results are archived by date. Re-saving a past date updates only that date and does not replace a newer match result. BR points are kills plus the placement points in `data.js`; CS wins = 3 points, losses = 0.
+8. **Manage room details:** select the correct mode, format/team size, fee, and Normal/One Tap type before saving a Room ID/password and optional QR. “Remove Saved Room Details” unpublishes and deletes only those credentials; registrations remain unchanged.
+9. **Choose the public default:** select either the latest saved match date or all-time cumulative standings. Visitors can also enter any date on the public leaderboard; unavailable dates show a clear empty state.
+10. **Read save confirmations:** successful admin actions show a compact auto-dismiss toast for about 2.5 seconds. Failed saves show an error toast and do not show a success confirmation.
 
 All-time BR totals add the saved date totals; the match cells show the most recent saved session. All-time CS totals add win points and use combined round difference as a tiebreaker. Public leaderboard history contains roster names/results, not player IDs, WhatsApp numbers or payment references.
 
@@ -79,6 +80,7 @@ All-time BR totals add the saved date totals; the match cells show the most rece
 
 - BR lobby slots are numbered 1–12 for every BR format; CS lobby slots are 1–2. A submitted registration reserves a slot immediately, while admin approval is tracked separately.
 - The selected lobby suffix is the time slot. Changing the schedule does not create extra rooms or matches; it only changes the displayed time for the three existing slots.
+- Each Clash Squad size has separate rooms so 1v1, 2v2, 3v3 and 4v4 sides are never mixed in one match. New room IDs include their size; existing legacy 4v4 IDs remain unchanged so saved registrations and room details continue to resolve.
 - The BR fee, CS fee, match counts, and placement table are configured in `data.js`.
 
 ## Deployment / replacing an older version
@@ -92,14 +94,16 @@ All-time BR totals add the saved date totals; the match cells show the most rece
 
 ## Files changed in this update
 
-- `server.py` — configurable durable data path, atomic backup/restore, legacy migration, dated match archive/API, public view setting, and storage-status reporting
-- `site.js` — date-aware leaderboard, historical result entry, registration calendar, compact success toasts, and local archive handling
-- `admin.html` — storage warning, registration calendar, match-date field, and leaderboard-default control; removed the full-screen admin success dialog
-- `leaderboard.html` — public match-date, latest, and all-time controls
+- `data.js` — CS team sizes, separate size-specific rooms, and legacy squad room-ID compatibility
+- `clash-squad.html` — selectable 1v1/2v2/3v3/4v4 forms with size-specific rosters and per-side fees
+- `site.js` — dynamic CS rosters, date-linked admin calendar/results, public date empty states, and room-details removal control
+- `server.py` — CS roster-size validation, two-side capacity, and an authenticated room-details deletion endpoint; existing durable storage and dated archives remain
+- `admin.html` — CS team-size room controls, calendar counts/empty states, selectable result dates, and remove-details action
+- `leaderboard.html` — public match-date, latest, and all-time controls remain available
 - `styles.css` — calendar, date filter, storage-status, and toast styling
 - `render.yaml` — explicitly documents the existing Free/ephemeral setup; no paid plan or disk is enabled
 - `.gitignore` — excludes JSON state and its backup/temp files
-- `tests/test_server_api.py` — regression coverage for persistence, archives, settings and migration
+- `tests/test_server_api.py` — regression coverage for persistence, archives, settings, size-specific CS rosters, capacity and room-detail removal
 - `README.md` — deployment, storage and feature documentation
 
 ## Tests
@@ -113,7 +117,7 @@ node --check data.js
 python3 -m py_compile server.py
 ```
 
-The API regression suite covers payment QR persistence/backup recovery, legacy-file migration to a configured data directory, dated result archives and backfills, leaderboard defaults, schedules, manual payment approval, BR scoring, CS results, room-QR privacy/release, emoji edits, registration removal and lobby capacity.
+The API regression suite covers payment QR persistence/backup recovery, legacy-file migration, dated result archives/backfills, leaderboard defaults, schedules, manual payment approval, BR scoring, variable-size and legacy CS rosters, two-side room capacity, room-QR privacy/release and removal, emoji edits, and registration removal.
 
 ## Privacy and event wording
 
