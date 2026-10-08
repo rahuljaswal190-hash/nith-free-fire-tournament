@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Leaderboard | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Track Battle Royale and Clash Squad leaderboard standings." />
-  <link rel="stylesheet" href="styles.css?v=20261006-final-v6" />
+  <link rel="stylesheet" href="styles.css?v=20261008-date-archive-v1" />
 </head>
 <body data-page="leaderboard" id="top">
 <header class="site-header">
@@ -38,6 +38,21 @@
   </section>
 
   <section class="section">
+    <article class="rule-card leaderboard-controls">
+      <div>
+        <span class="eyebrow">Standings view</span>
+        <h2>Browse match history</h2>
+        <p id="leaderboard-view-note" class="disclaimer">Choose a saved match date, latest results, or all-time totals.</p>
+      </div>
+      <div class="leaderboard-filter-grid">
+        <label>Leaderboard view<select id="leaderboard-view"><option value="latest">Latest match date</option><option value="all">All-time cumulative</option><option value="date">Selected match date</option></select></label>
+        <label>Match date<input id="leaderboard-date" type="date" /></label>
+        <label>Saved dates<select id="leaderboard-saved-date"><option value="">No saved match dates yet</option></select></label>
+      </div>
+    </article>
+  </section>
+
+  <section class="section">
     <div class="scoring-grid">
       <article class="rule-card"><h3>Battle Royale scoring</h3><p>Each assigned session contains 3 matches. The organizer enters kills and placement for each match; points are calculated automatically and added to the cumulative total.</p><p>Placement table: 1st 12, 2nd 9, 3rd 8, 4th 7, 5th 6, 6th 5, 7th 4, 8th 3, 9th 2, 10th 1, 11th-12th 0.</p></article>
       <article class="rule-card"><h3>Clash Squad scoring</h3><p>Each assigned session contains 1 match. The organizer records Win/Loss and round difference after verification; wins earn 3 points.</p><p>Normal and One Tap leaderboards use the same ranking logic unless organizers announce a special rule.</p></article>
@@ -63,6 +78,6 @@
   <a href="#top">Back to top ↑</a>
 </footer>
 <script src="data.js?v=20261006-final-v6"></script>
-<script src="site.js?v=20261006-final-v6"></script>
+<script src="site.js?v=20261008-date-archive-v1"></script>
 </body>
 </html>

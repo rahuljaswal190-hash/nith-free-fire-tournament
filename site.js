@@ -12,6 +12,7 @@ let PAYMENT_QR_DATA = "";
 let ROOM_QR_DATA = "";
 let EDITING_REGISTRATION_ID = "";
 let lastStatusSearch = null;
+let ADMIN_CALENDAR_SELECTED_DATE = "";
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => Array.from(scope.querySelectorAll(selector));
@@ -23,6 +24,8 @@ function defaultState() {
     approvedSlots: [],
     approvedTeams: [],
     leaderboard: { br: [], cs: [] },
+    matchHistory: [],
+    leaderboardSettings: { defaultView: "latest" },
     notices: [],
     paymentSettings: { payeeName: "", upiId: "", note: "", qrDataUrl: "" },
     scheduleWindows: DATA.matchWindows || { br: [], cs: [] },
@@ -45,6 +48,8 @@ function normalizeState(raw = {}) {
       br: Array.isArray(raw.leaderboard?.br) ? raw.leaderboard.br : [],
       cs: Array.isArray(raw.leaderboard?.cs) ? raw.leaderboard.cs : []
     },
+    matchHistory: Array.isArray(raw.matchHistory) ? raw.matchHistory : [],
+    leaderboardSettings: { defaultView: raw.leaderboardSettings?.defaultView === "all" ? "all" : "latest" },
     notices: Array.isArray(raw.notices) ? raw.notices : [],
     paymentSettings: raw.paymentSettings && typeof raw.paymentSettings === "object" ? raw.paymentSettings : { payeeName: "", upiId: "", note: "", qrDataUrl: "" },
     scheduleWindows: raw.scheduleWindows && typeof raw.scheduleWindows === "object" ? raw.scheduleWindows : (DATA.matchWindows || { br: [], cs: [] })
@@ -777,20 +782,8 @@ function setupModal() {
   });
 }
 
-function showAdminConfirmation(title, message) {
-  const modal = $("#admin-confirmation-modal");
-  if (!modal) return toast(`${title}: ${message}`);
-  const titleNode = $("#admin-confirmation-title");
-  const messageNode = $("#admin-confirmation-message");
-  const timeNode = $("#admin-confirmation-time");
-  if (titleNode) titleNode.textContent = title;
-  if (messageNode) messageNode.textContent = message;
-  if (timeNode) timeNode.textContent = `Confirmed ${new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}`;
-  if (typeof modal.showModal === "function") {
-    if (!modal.open) modal.showModal();
-  } else {
-    toast(`${title}: ${message}`);
-  }
+function showAdminConfirmation(title) {
+  toast(String(title || "Saved successfully"), false, 2500);
 }
 
 function showSuccess(summary, data) {
@@ -812,7 +805,83 @@ function showSuccess(summary, data) {
   else alert(summary);
 }
 
+function todayDateIST() {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function stableLocalEntryKey(value) {
+  let hash = 2166136261;
+  for (const character of String(value || "")) {
+    hash ^= character.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `local-${(hash >>> 0).toString(16)}`;
+}
+
+function formatIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return "—";
+  const dateValue = new Date(`${value}T12:00:00+05:30`);
+  if (Number.isNaN(dateValue.getTime())) return value;
+  return dateValue.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+}
+
+function leaderboardViewSelection() {
+  const control = $("#leaderboard-view");
+  if (control) return control.value || "latest";
+  return loadState().leaderboardSettings?.defaultView === "all" ? "all" : "latest";
+}
+
+function leaderboardDateSelection() {
+  return $("#leaderboard-date")?.value || todayDateIST();
+}
+
 function renderLeaderboardPage() {
+  const state = loadState();
+  const viewControl = $("#leaderboard-view");
+  const dateControl = $("#leaderboard-date");
+  const savedDateControl = $("#leaderboard-saved-date");
+  const note = $("#leaderboard-view-note");
+  const dates = [...new Set((state.matchHistory || []).map((row) => row.date).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))))].sort().reverse();
+  const newestDate = dates[0] || todayDateIST();
+
+  if (viewControl && viewControl.dataset.initialized !== "true") {
+    viewControl.value = state.leaderboardSettings?.defaultView === "all" ? "all" : "latest";
+    viewControl.dataset.initialized = "true";
+  }
+  if (dateControl && (!dateControl.value || (viewControl?.value !== "date" && viewControl?.value !== "all"))) dateControl.value = newestDate;
+  if (savedDateControl) {
+    const previous = savedDateControl.value;
+    savedDateControl.innerHTML = dates.length
+      ? `<option value="">Choose a saved date…</option>${dates.map((date) => `<option value="${escapeHtml(date)}">${escapeHtml(formatIsoDate(date))}</option>`).join("")}`
+      : `<option value="">No saved match dates yet</option>`;
+    if (dates.includes(previous)) savedDateControl.value = previous;
+    if (viewControl?.value === "date" && dates.includes(dateControl?.value || "")) savedDateControl.value = dateControl.value;
+  }
+  if (viewControl && viewControl.dataset.bound !== "true") {
+    viewControl.dataset.bound = "true";
+    viewControl.addEventListener("change", () => renderLeaderboardPage());
+    dateControl?.addEventListener("change", () => {
+      viewControl.value = "date";
+      renderLeaderboardPage();
+    });
+    savedDateControl?.addEventListener("change", () => {
+      if (savedDateControl.value && dateControl) {
+        dateControl.value = savedDateControl.value;
+        viewControl.value = "date";
+        renderLeaderboardPage();
+      }
+    });
+  }
+  if (note) {
+    const view = leaderboardViewSelection();
+    note.textContent = view === "all"
+      ? "All-time totals add every saved match date. Match-by-match detail shows the most recent saved session for each entry."
+      : view === "date"
+        ? `Showing saved results for ${formatIsoDate(leaderboardDateSelection())}.`
+        : "Showing each mode’s latest saved match date. Use the date picker or saved-date list to browse earlier results.";
+  }
   renderLeaderboards("#br-leaderboard", "br");
   renderLeaderboards("#cs-leaderboard", "cs");
 }
@@ -840,16 +909,62 @@ function getApprovedTeamRows(mode) {
       csResult: reg.csResult || null,
       lastMatchScore: reg.brMatches?.slice().reverse().find((match) => match && match.score !== null && match.score !== undefined)?.score ?? null,
       csRoundDiff: reg.csResult?.roundDiff ?? null,
-      finalScore: reg.finalScore
+      finalScore: reg.finalScore,
+      matchDate: reg.scoreUpdatedAt ? String(reg.scoreUpdatedAt).slice(0, 10) : ""
     }));
   }
   return teams.filter((row) => row.mode === mode || (mode === "br" && row.modeLabel === "Battle Royale") || (mode === "cs" && row.modeLabel === "Clash Squad"));
 }
 
+function aggregateHistoryRows(historyRows, mode) {
+  const groups = new Map();
+  historyRows.forEach((row) => {
+    const key = row.entryKey || `${row.teamName || ""}|${row.roomId || ""}|${row.slotNumber || ""}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+  return [...groups.values()].map((group) => {
+    group.sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+    const latest = group[group.length - 1];
+    const scored = group.filter((row) => row.finalScore !== null && row.finalScore !== undefined && row.finalScore !== "");
+    const total = scored.reduce((sum, row) => sum + Number(row.finalScore || 0), 0);
+    if (mode === "br") {
+      return { ...latest, finalScore: scored.length ? total : null, brMatches: latest.brMatches || [], lastMatchScore: latest.lastMatchScore, matchDate: latest.date, allTimeDays: group.length };
+    }
+    const wins = group.filter((row) => row.csResult?.outcome === "Win").length;
+    const losses = group.filter((row) => row.csResult?.outcome === "Loss").length;
+    const totalRoundDiff = group.reduce((sum, row) => sum + Number(row.csRoundDiff ?? row.csResult?.roundDiff ?? 0), 0);
+    return {
+      ...latest,
+      wins,
+      losses,
+      finalScore: scored.length ? total : null,
+      csResult: { ...(latest.csResult || {}), outcome: `${wins}W–${losses}L`, roundDiff: totalRoundDiff },
+      csRoundDiff: totalRoundDiff,
+      matchDate: latest.date,
+      allTimeDays: group.length
+    };
+  });
+}
+
+function getLeaderboardRows(mode) {
+  const state = loadState();
+  const view = leaderboardViewSelection();
+  const history = (state.matchHistory || []).filter((row) => row && row.mode === mode && /^\d{4}-\d{2}-\d{2}$/.test(String(row.date || "")));
+  if (view === "date") return history.filter((row) => row.date === leaderboardDateSelection());
+  if (history.length) {
+    if (view === "all") return aggregateHistoryRows(history, mode);
+    const latestDate = history.reduce((latest, row) => row.date > latest ? row.date : latest, "");
+    return history.filter((row) => row.date === latestDate);
+  }
+  return getApprovedTeamRows(mode);
+}
+
 function renderLeaderboards(selector, mode) {
   const container = $(selector);
   if (!container) return;
-  const rows = getApprovedTeamRows(mode).map((row) => ({
+  const view = leaderboardViewSelection();
+  const rows = getLeaderboardRows(mode).map((row) => ({
     ...row,
     _score: row.finalScore === null || row.finalScore === undefined || row.finalScore === "" ? null : Number(row.finalScore)
   })).sort((a, b) => {
@@ -863,7 +978,9 @@ function renderLeaderboards(selector, mode) {
   });
 
   if (!rows.length) {
-    container.innerHTML = `<div class="empty-state"><h3>No approved ${mode === "br" ? "Battle Royale" : "Clash Squad"} teams yet</h3><p>Once the organizer approves a registration, its slot and team name will appear here automatically. Match results are published after organizer verification.</p></div>`;
+    const title = view === "date" ? `No ${mode === "br" ? "Battle Royale" : "Clash Squad"} results saved for ${formatIsoDate(leaderboardDateSelection())}` : `No approved ${mode === "br" ? "Battle Royale" : "Clash Squad"} teams yet`;
+    const message = view === "date" ? "Choose another saved date, or ask the organizer whether results for this day have been published." : "Once the organizer approves an entry, its slot and team name will appear here. Verified match results are published after review.";
+    container.innerHTML = `<div class="empty-state"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(message)}</p></div>`;
     return;
   }
   let rank = 0;
@@ -879,8 +996,10 @@ function renderLeaderboards(selector, mode) {
     const format = mode === "br" ? (row.formatLabel || row.format || "Battle Royale") : (row.variant || "Clash Squad");
     const roster = (row.players || []).filter(Boolean).join(", ") || "Roster submitted";
     const cumulative = row._score === null ? "Awaiting score" : row._score;
+    const matchDateLabel = row.allTimeDays ? `All-time · ${row.allTimeDays} date${row.allTimeDays === 1 ? "" : "s"} · latest ${formatIsoDate(row.matchDate || row.date)}` : formatIsoDate(row.matchDate || row.date);
     const common = `<td>${displayedRank}</td>
       <td><b>${row.slotNumber ? `#${escapeHtml(row.slotNumber)}/${escapeHtml(row.slotCapacity || 12)}` : "—"}</b></td>
+      <td>${escapeHtml(matchDateLabel)}</td>
       <td><strong>${escapeHtml(row.teamName || "-")}</strong><br><small>${escapeHtml(roster)}</small></td>
       <td>${escapeHtml(format)}</td>
       <td>${row.fee ? formatFee(row.fee) : "—"}</td>
@@ -901,13 +1020,15 @@ function renderLeaderboards(selector, mode) {
     return `<tr class="${row._score !== null && rank <= 3 ? "top-row" : ""}">${common}<td>${escapeHtml(outcome)}</td><td>${escapeHtml(roundDiff)}</td><td><b>${escapeHtml(cumulative)}</b></td></tr>`;
   }).join("");
   const modeTitle = mode === "br" ? "Battle Royale" : "Clash Squad";
+  const scoreHeading = view === "all" ? "All-time total" : view === "date" ? "Date total" : "Match-date total";
   const headers = mode === "br"
-    ? `<th>Rank</th><th>Slot</th><th>Team / Entry & roster</th><th>Format</th><th>Fee</th><th>Match time</th><th>Lobby</th><th>Match 1</th><th>Match 2</th><th>Match 3</th><th>Last match</th><th>Cumulative</th>`
-    : `<th>Rank</th><th>Slot</th><th>Team & roster</th><th>Type</th><th>Fee</th><th>Match time</th><th>Room</th><th>Result</th><th>Round diff</th><th>Points</th>`;
-  const note = mode === "br"
-    ? "Each BR match score is kills plus the published placement points. Cumulative standings add the scored matches; last-match score is shown separately."
-    : "Clash Squad points are 3 for a win and 0 for a loss; round difference is used as a tiebreaker.";
-  container.innerHTML = `<div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${tableRows}</tbody></table></div><p class="disclaimer">${modeTitle} standings update when entries are approved and when the organizer saves verified match results. ${note}</p>`;
+    ? `<th>Rank</th><th>Slot</th><th>Match date</th><th>Team / Entry & roster</th><th>Format</th><th>Fee</th><th>Match time</th><th>Lobby</th><th>Match 1</th><th>Match 2</th><th>Match 3</th><th>Last match</th><th>${scoreHeading}</th>`
+    : `<th>Rank</th><th>Slot</th><th>Match date</th><th>Team & roster</th><th>Type</th><th>Fee</th><th>Match time</th><th>Room</th><th>Result</th><th>Round diff</th><th>${scoreHeading}</th>`;
+  const noteText = mode === "br"
+    ? "Each BR match score is kills plus the published placement points. The cumulative total follows the selected view; match-by-match cells show the selected session."
+    : "Clash Squad points are 3 for a win and 0 for a loss; round difference is used as a tiebreaker. All-time view sums saved results. ";
+  const selectedLabel = view === "date" ? `Selected date: ${formatIsoDate(leaderboardDateSelection())}. ` : view === "all" ? "All-time cumulative standings. " : "Latest saved results for this mode. ";
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${tableRows}</tbody></table></div><p class="disclaimer">${escapeHtml(selectedLabel + modeTitle + " standings. " + noteText)}</p>`;
 }
 
 function renderRoomDetailsPage() {
@@ -1152,6 +1273,102 @@ function updateAdminSchedulePreview() {
   preview.innerHTML = `<b>BR:</b> ${previewAdminWindows("br", settings).map(escapeHtml).join(" · ")} <br><b>CS:</b> ${previewAdminWindows("cs", settings).map(escapeHtml).join(" · ")}`;
 }
 
+function updateAdminStorageStatus(info) {
+  const node = $("#admin-storage-status");
+  if (!node) return;
+  if (!info) {
+    node.className = "storage-status warning";
+    node.textContent = "Browser/local-only mode: changes are stored on this device and are not shared or protected from browser-data loss.";
+    return;
+  }
+  const path = info.path ? ` (${info.path})` : "";
+  if (info.mounted) {
+    node.className = "storage-status good";
+    node.textContent = `Mounted volume detected${path}. Confirm this mount is a persistent disk on your host; the app is writing its JSON state there.`;
+  } else if (info.configuredDirectory) {
+    node.className = "storage-status warning";
+    node.textContent = `A custom data path is configured${path}, but no mounted persistent volume was detected. Verify the host volume; otherwise files may disappear on restart/redeploy.`;
+  } else {
+    node.className = "storage-status warning";
+    node.textContent = `No persistent volume detected${path}. This server file may be removed by a host restart/redeploy; configure a persistent disk and TOURNAMENT_DATA_DIR before relying on payment settings or archived results.`;
+  }
+}
+
+function registrationDateKey(registration) {
+  const raw = registration?.serverReceivedAt || registration?.submittedAt || registration?.createdAt;
+  if (!raw) return "";
+  const dateValue = new Date(raw);
+  if (Number.isNaN(dateValue.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(dateValue);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function registrationTimeLabel(registration) {
+  const raw = registration?.serverReceivedAt || registration?.submittedAt || registration?.createdAt;
+  if (!raw) return "—";
+  const dateValue = new Date(raw);
+  if (Number.isNaN(dateValue.getTime())) return "—";
+  return dateValue.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" });
+}
+
+function renderAdminCalendar(registrations = []) {
+  const calendar = $("#registration-calendar");
+  const monthInput = $("#registration-calendar-month");
+  const summary = $("#registration-calendar-summary");
+  const dayDetails = $("#registrations-for-day");
+  if (!calendar || !monthInput) return;
+  if (!monthInput.value) monthInput.value = todayDateIST().slice(0, 7);
+  if (monthInput.dataset.bound !== "true") {
+    monthInput.dataset.bound = "true";
+    monthInput.addEventListener("change", () => {
+      ADMIN_CALENDAR_SELECTED_DATE = "";
+      renderAdminCalendar(ADMIN_REGISTRATIONS);
+    });
+  }
+  const [year, month] = monthInput.value.split("-").map(Number);
+  if (!year || !month || month < 1 || month > 12) return;
+  const counts = new Map();
+  const registrationsByDate = new Map();
+  (registrations || []).forEach((reg) => {
+    const key = registrationDateKey(reg);
+    if (!key) return;
+    counts.set(key, Number(counts.get(key) || 0) + 1);
+    if (!registrationsByDate.has(key)) registrationsByDate.set(key, []);
+    registrationsByDate.get(key).push(reg);
+  });
+  const monthKey = monthInput.value;
+  const daysWithRegistrations = [...counts.keys()].filter((key) => key.startsWith(`${monthKey}-`)).sort();
+  if (!ADMIN_CALENDAR_SELECTED_DATE.startsWith(`${monthKey}-`)) {
+    ADMIN_CALENDAR_SELECTED_DATE = daysWithRegistrations[0] || `${monthKey}-01`;
+  }
+  const totalInMonth = daysWithRegistrations.reduce((sum, key) => sum + counts.get(key), 0);
+  if (summary) summary.textContent = `${totalInMonth} registration${totalInMonth === 1 ? "" : "s"} across ${daysWithRegistrations.length} active date${daysWithRegistrations.length === 1 ? "" : "s"}. Dates use India Standard Time.`;
+  const weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const firstDayOffset = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const blanks = Array.from({ length: firstDayOffset }, () => `<span class="calendar-blank" aria-hidden="true"></span>`).join("");
+  const dayButtons = Array.from({ length: daysInMonth }, (_, index) => {
+    const day = index + 1;
+    const key = `${monthKey}-${String(day).padStart(2, "0")}`;
+    const count = Number(counts.get(key) || 0);
+    const selected = key === ADMIN_CALENDAR_SELECTED_DATE;
+    return `<button type="button" class="calendar-day ${count ? "has-registrations" : ""} ${selected ? "selected" : ""}" data-calendar-date="${key}" ${count ? "" : "disabled"} aria-label="${formatIsoDate(key)}: ${count} registration${count === 1 ? "" : "s"}"><span>${day}</span><small>${count || "·"}</small></button>`;
+  }).join("");
+  calendar.innerHTML = `<div class="calendar-weekdays">${weekdayNames.map((name) => `<span>${name}</span>`).join("")}</div><div class="calendar-days">${blanks}${dayButtons}</div>`;
+  $$('[data-calendar-date]', calendar).forEach((button) => button.addEventListener("click", () => {
+    ADMIN_CALENDAR_SELECTED_DATE = button.dataset.calendarDate || "";
+    renderAdminCalendar(ADMIN_REGISTRATIONS);
+  }));
+  if (dayDetails) {
+    const selectedRows = registrationsByDate.get(ADMIN_CALENDAR_SELECTED_DATE) || [];
+    const dateTitle = formatIsoDate(ADMIN_CALENDAR_SELECTED_DATE);
+    dayDetails.innerHTML = selectedRows.length
+      ? `<h3>${escapeHtml(dateTitle)} · ${selectedRows.length} registration${selectedRows.length === 1 ? "" : "s"}</h3><div class="table-wrap"><table><thead><tr><th>Status</th><th>Submitted time (IST)</th><th>Slot</th><th>Mode / format</th><th>Entry / team</th><th>Roster</th><th>Room</th><th>Contact</th><th>Payment ref</th></tr></thead><tbody>${selectedRows.map((reg) => `<tr><td>${registrationStatusBadge(reg.status)}</td><td>${escapeHtml(registrationTimeLabel(reg))}</td><td>${slotLabel(reg)}</td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(reg.formatLabel || reg.variant || "-")}</td><td>${escapeHtml(reg.teamName || "-")}</td><td>${playerListHtml(reg)}</td><td>${escapeHtml(reg.roomId || "-")}</td><td>${escapeHtml(reg.whatsapp || "-")}</td><td>${escapeHtml(reg.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty-state"><h3>${escapeHtml(dateTitle)}</h3><p>No registrations were received on this date.</p></div>`;
+  }
+}
+
 function populateAdminSettingsFromSummary(summary = {}) {
   const settings = summary.scheduleSettings || { br: { startTime: "21:00", durationHours: 1, gapHours: 0 }, cs: { startTime: "21:00", durationHours: 1, gapHours: 0 } };
   ["br", "cs"].forEach((mode) => {
@@ -1168,6 +1385,9 @@ function populateAdminSettingsFromSummary(summary = {}) {
   if ($("#payment-note")) $("#payment-note").value = payment.note || "";
   PAYMENT_QR_DATA = payment.qrDataUrl || "";
   setQrPreview("payment", PAYMENT_QR_DATA);
+  const boardView = $("#leaderboard-default-view");
+  if (boardView) boardView.value = summary.leaderboardSettings?.defaultView === "all" ? "all" : "latest";
+  updateAdminStorageStatus(summary.storageInfo);
   updateAdminSchedulePreview();
   loadRoomDetailAdminFields();
 }
@@ -1215,6 +1435,8 @@ function setupAdminListeners() {
   $("#admin-variant")?.addEventListener("change", updateAdminRoomChoices);
   $("#save-room-count")?.addEventListener("click", saveAdminRoomCount);
   $("#save-final-scores")?.addEventListener("click", saveFinalScores);
+  $("#admin-result-date")?.addEventListener("change", renderFinalScoreTable);
+  $("#save-leaderboard-settings")?.addEventListener("click", saveLeaderboardSettings);
   $("#export-registrations")?.addEventListener("click", exportRegistrationsCsv);
   $("#clear-registrations")?.addEventListener("click", clearRegistrations);
   $("#export-state")?.addEventListener("click", exportStateJson);
@@ -1236,8 +1458,6 @@ function setupAdminListeners() {
   $("#edit-registration-form")?.addEventListener("submit", saveRegistrationEdits);
   $("#edit-registration-close")?.addEventListener("click", () => $("#edit-registration-modal")?.close());
   $("#edit-registration-cancel")?.addEventListener("click", () => $("#edit-registration-modal")?.close());
-  $("#admin-confirmation-close")?.addEventListener("click", () => $("#admin-confirmation-modal")?.close());
-  $("#admin-confirmation-ok")?.addEventListener("click", () => $("#admin-confirmation-modal")?.close());
 }
 
 function renderAdminPanel() {
@@ -1283,20 +1503,24 @@ async function saveAdminRoomCount() {
   if (!room) return toast("Select a room first.", true);
   const count = Number($("#admin-confirmed-count")?.value || 0);
   if (count < 0 || count > room.capacity) return toast(`Count must be between 0 and ${room.capacity}.`, true);
-  if (SERVER_AVAILABLE && currentAdminPin) {
-    await apiPost("/api/admin/room-count", { pin: currentAdminPin, roomId: room.id, count });
-    await refreshStateFromServer();
-    renderAdminTables();
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/room-count", { pin: currentAdminPin, roomId: room.id, count });
+      await refreshStateFromServer();
+      await renderAdminTables();
+      renderPage();
+      showAdminConfirmation("Room count updated");
+      return;
+    }
+    const state = loadState();
+    state.roomOverrides[room.id] = count;
+    saveState(state);
+    await renderAdminTables();
     renderPage();
-    showAdminConfirmation("Room count updated", `${room.title}: ${count}/${room.capacity} ${entryLabel(room)} recorded. Availability has been refreshed.`);
-    return;
+    showAdminConfirmation("Room count saved on this device");
+  } catch (error) {
+    toast(error.message || "Could not save the room count.", true);
   }
-  const state = loadState();
-  state.roomOverrides[room.id] = count;
-  saveState(state);
-  renderAdminTables();
-  renderPage();
-  showAdminConfirmation("Room count saved on this device", `${room.title}: ${count}/${room.capacity} ${entryLabel(room)} recorded locally. A shared backend is needed to publish this count to all players.`);
 }
 
 function updateRoomShareChoices() {
@@ -1381,19 +1605,18 @@ async function saveRoomDetails() {
       await refreshStateFromServer();
       await renderAdminTables();
       renderPage();
-      const roomSaveTitle = published ? "Room details saved" : "Room details saved but hidden";
-      const roomSaveMessage = !published
-        ? "The ID/password and optional QR are stored, but Publish on Room Details page is turned off, so players cannot see them yet."
+      const roomSaveTitle = !published
+        ? "Room details saved (hidden)"
         : forcePublish
-          ? "The ID/password and optional QR were published and released to players now."
-          : "The ID/password and optional QR were published; players will see them when the lobby is full. Enable Force release to show them sooner.";
-      showAdminConfirmation(roomSaveTitle, roomSaveMessage);
+          ? "Room details released"
+          : "Room details saved; release when full";
+      showAdminConfirmation(roomSaveTitle);
       return;
     }
     const state = loadState();
     state.roomDetails[roomId] = detail;
     saveState(state);
-    showAdminConfirmation("Room details saved on this device", "The ID/password and optional QR are saved locally. A shared backend is needed to publish them to all players.");
+    showAdminConfirmation("Room details saved on this device");
     renderRoomDetailsPage();
   } catch (error) {
     toast(error.message || "Could not save room details.", true);
@@ -1424,6 +1647,27 @@ function buildClientScheduleWindows(settings) {
   return output;
 }
 
+async function saveLeaderboardSettings() {
+  const defaultView = $("#leaderboard-default-view")?.value || "latest";
+  if (!["latest", "all"].includes(defaultView)) return toast("Choose a valid public leaderboard view.", true);
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/leaderboard-settings", { pin: currentAdminPin, settings: { defaultView } });
+      await refreshStateFromServer();
+      await renderAdminTables();
+      showAdminConfirmation("Leaderboard default saved");
+      return;
+    }
+    const state = loadState();
+    state.leaderboardSettings = { defaultView };
+    saveState(state);
+    await renderAdminTables();
+    showAdminConfirmation("Leaderboard default saved on this device");
+  } catch (error) {
+    toast(error.message || "Could not save the leaderboard default.", true);
+  }
+}
+
 async function saveScheduleSettings() {
   const settings = adminScheduleSettingsFromControls();
   try {
@@ -1432,7 +1676,7 @@ async function saveScheduleSettings() {
       await refreshStateFromServer();
       await renderAdminTables();
       renderSchedulePage();
-      showAdminConfirmation("Match schedule published", "Separate BR and CS times, durations, and gaps are saved. The public schedule and lobby selectors will use these settings.");
+      showAdminConfirmation("Match schedule published");
       return;
     }
     const state = loadState();
@@ -1443,7 +1687,7 @@ async function saveScheduleSettings() {
     SERVER_AVAILABLE = false;
     renderSchedulePage();
     populateMatchTimeSelects();
-    showAdminConfirmation("Timings saved on this device", "The three BR and CS slots were updated locally. A shared backend is needed to publish them to all players.");
+    showAdminConfirmation("Timings saved on this device");
   } catch (error) {
     toast(error.message || "Could not save schedule settings.", true);
   }
@@ -1462,7 +1706,7 @@ async function savePaymentSettings() {
       await refreshStateFromServer();
       await renderAdminTables();
       $$('[data-registration-form]').forEach(renderPaymentInstructions);
-      showAdminConfirmation("Payment settings saved", "The BR and CS registration pages now use these payment settings. UTR/reference still needs manual verification before approval.");
+      showAdminConfirmation("Payment settings saved");
       return;
     }
     const state = loadState();
@@ -1470,7 +1714,7 @@ async function savePaymentSettings() {
     saveState(state);
     SERVER_STATE = state;
     $$('[data-registration-form]').forEach(renderPaymentInstructions);
-    showAdminConfirmation("Payment details saved on this device", "The QR/UPI details are stored locally. A shared backend is needed to publish them to all players.");
+    showAdminConfirmation("Payment details saved on this device");
   } catch (error) {
     toast(error.message || "Could not save payment instructions.", true);
   }
@@ -1502,7 +1746,10 @@ async function renderAdminTables() {
       approvedExpectedAmount: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").reduce((sum, r) => sum + Number(r.fee || 0), 0),
       scheduleSettings: loadState().scheduleSettings || { br: { startTime: "21:00", durationHours: 1, gapHours: 0 }, cs: { startTime: "21:00", durationHours: 1, gapHours: 0 } },
       paymentSettings: loadState().paymentSettings || {},
-      roomDetails: loadState().roomDetails || {}
+      roomDetails: loadState().roomDetails || {},
+      matchHistory: loadState().matchHistory || [],
+      leaderboardSettings: loadState().leaderboardSettings || { defaultView: "latest" },
+      storageInfo: null
     };
     ADMIN_SUMMARY = summaryForCards;
     renderAdminSummaryCards(summaryForCards);
@@ -1546,6 +1793,7 @@ async function renderAdminTables() {
       $$('[data-reg-delete]', regs).forEach((button) => button.addEventListener("click", () => deleteRegistration(button.dataset.regDelete)));
     }
   }
+  renderAdminCalendar(ADMIN_REGISTRATIONS);
   renderLeaderboards("#admin-br-preview", "br");
   renderLeaderboards("#admin-cs-preview", "cs");
 }
@@ -1609,7 +1857,7 @@ async function saveRegistrationEdits(event) {
     await renderAdminTables();
     renderLeaderboards("#admin-br-preview", "br");
     renderLeaderboards("#admin-cs-preview", "cs");
-    showAdminConfirmation("Registration updated", "The team/entry name and roster changes were saved, including emoji and symbol names.");
+    showAdminConfirmation("Registration updated");
   } catch (error) {
     toast(error.message || "Could not save registration edits.", true);
   }
@@ -1630,7 +1878,7 @@ async function deleteRegistration(registrationId) {
     }
     await renderAdminTables();
     renderPage();
-    showAdminConfirmation("Registration removed", "The registration was deleted and its reserved lobby slot is available again.");
+    showAdminConfirmation("Registration removed");
   } catch (error) {
     toast(error.message || "Could not remove registration.", true);
   }
@@ -1639,6 +1887,10 @@ async function deleteRegistration(registrationId) {
 function renderFinalScoreTable() {
   const box = $("#final-score-table");
   if (!box) return;
+  const dateInput = $("#admin-result-date");
+  if (dateInput && !dateInput.value) dateInput.value = todayDateIST();
+  const matchDate = dateInput?.value || todayDateIST();
+  const history = ADMIN_SUMMARY?.matchHistory || [];
   const approved = ADMIN_REGISTRATIONS.filter((reg) => String(reg.status || "").toLowerCase() === "approved").sort((a, b) => String(a.roomId || "").localeCompare(String(b.roomId || "")) || Number(a.slotNumber || 99) - Number(b.slotNumber || 99));
   if (!approved.length) {
     box.innerHTML = `<div class="empty-state"><h3>No approved teams to score yet</h3><p>Approve registrations above. Each approved entry will appear here with the correct match-result controls.</p></div>`;
@@ -1646,24 +1898,33 @@ function renderFinalScoreTable() {
   }
   const rows = approved.map((reg) => {
     const mode = reg.mode || (String(reg.roomId || "").startsWith("CS-") ? "cs" : "br");
+    const saved = history.find((item) => String(item.registrationId) === String(reg.id) && item.date === matchDate);
+    const legacyCurrent = !saved && String(reg.scoreUpdatedAt || "").slice(0, 10) === matchDate ? reg : null;
+    const resultSource = saved || legacyCurrent || {};
+    const brMatches = Array.isArray(resultSource.brMatches) ? resultSource.brMatches : [];
+    const csResult = resultSource.csResult || {};
     const resultControl = mode === "br" ? `<div class="br-score-editor">${[0, 1, 2].map((index) => {
-      const match = reg.brMatches?.[index] || {};
+      const match = brMatches[index] || {};
       const positionOptions = [`<option value="">Place</option>`, ...Array.from({ length: 12 }, (_, posIndex) => {
         const position = posIndex + 1;
         const selected = Number(match.position) === position ? "selected" : "";
         return `<option value="${position}" ${selected}>#${position} · ${DATA.scoring.br.placement[position]} pts</option>`;
       })].join("");
       return `<fieldset class="br-match-input"><legend>Match ${index + 1}</legend><label>Kills<input class="score-input" type="number" min="0" max="99" step="1" inputmode="numeric" data-match-kills="${escapeHtml(reg.id)}" data-match-index="${index}" value="${match.kills ?? ""}" aria-label="Kills in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}" /></label><label>Placement<select data-match-position="${escapeHtml(reg.id)}" data-match-index="${index}" aria-label="Placement in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}">${positionOptions}</select></label></fieldset>`;
-    }).join("")}</div>` : `<div class="cs-score-editor"><label>Match result<select data-cs-outcome="${escapeHtml(reg.id)}"><option value="" ${!reg.csResult?.outcome ? "selected" : ""}>Not entered</option><option value="Win" ${reg.csResult?.outcome === "Win" ? "selected" : ""}>Win · 3 points</option><option value="Loss" ${reg.csResult?.outcome === "Loss" ? "selected" : ""}>Loss · 0 points</option></select></label><label>Round difference<input class="score-input" type="number" min="-99" max="99" step="1" data-cs-round-diff="${escapeHtml(reg.id)}" value="${reg.csResult?.roundDiff ?? ""}" placeholder="e.g. 3 or -2" /></label></div>`;
-    return `<tr><td><b>${slotLabel(reg)}</b></td><td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(reg.formatLabel || reg.variant || "-")}<br><small>${escapeHtml(reg.scheduleTime || "")}</small></td><td>${resultControl}</td><td><b>${reg.finalScore ?? "Awaiting"}</b></td></tr>`;
+    }).join("")}</div>` : `<div class="cs-score-editor"><label>Match result<select data-cs-outcome="${escapeHtml(reg.id)}"><option value="" ${!csResult.outcome ? "selected" : ""}>Not entered</option><option value="Win" ${csResult.outcome === "Win" ? "selected" : ""}>Win · 3 points</option><option value="Loss" ${csResult.outcome === "Loss" ? "selected" : ""}>Loss · 0 points</option></select></label><label>Round difference<input class="score-input" type="number" min="-99" max="99" step="1" data-cs-round-diff="${escapeHtml(reg.id)}" value="${csResult.roundDiff ?? ""}" placeholder="e.g. 3 or -2" /></label></div>`;
+    const datePoints = saved || legacyCurrent ? (resultSource.finalScore ?? "—") : "—";
+    return `<tr><td><b>${slotLabel(reg)}</b></td><td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(reg.formatLabel || reg.variant || "-")}<br><small>${escapeHtml(reg.scheduleTime || "")}</small></td><td>${resultControl}</td><td><b>${escapeHtml(datePoints)}</b></td></tr>`;
   }).join("");
-  box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Slot</th><th>Entry / roster</th><th>Mode · time</th><th>Verified result inputs</th><th>Current points</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Slot</th><th>Entry / roster</th><th>Mode · time</th><th>Verified result inputs · ${escapeHtml(formatIsoDate(matchDate))}</th><th>Date points</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 async function saveFinalScores() {
   if (!ADMIN_REGISTRATIONS.length) return toast("No registrations loaded.", true);
   const approved = ADMIN_REGISTRATIONS.filter((reg) => String(reg.status || "").toLowerCase() === "approved");
   if (!approved.length) return toast("Approve at least one registration first.", true);
+  const matchDate = $("#admin-result-date")?.value || todayDateIST();
+  const parsedMatchDate = new Date(`${matchDate}T12:00:00+05:30`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(matchDate) || Number.isNaN(parsedMatchDate.getTime()) || parsedMatchDate.toISOString().slice(0, 10) !== matchDate) return toast("Choose a valid match date.", true);
   const results = [];
   for (const reg of approved) {
     const mode = reg.mode || (String(reg.roomId || "").startsWith("CS-") ? "cs" : "br");
@@ -1676,79 +1937,129 @@ async function saveFinalScores() {
         return { kills: kills === "" ? null : Number(kills), position: position === "" ? null : Number(position) };
       });
       if (matches.some((match) => (match.kills === null) !== (match.position === null))) return toast(`Enter both kills and placement, or leave both blank, for ${reg.teamName}.`, true);
-      results.push({ registrationId: reg.id, matches });
+      if (matches.some((match) => match.kills !== null && match.position !== null)) results.push({ registrationId: reg.id, matches });
     } else {
       const outcome = $(`[data-cs-outcome="${CSS.escape(String(reg.id))}"]`)?.value || "";
       const rawRoundDiff = $(`[data-cs-round-diff="${CSS.escape(String(reg.id))}"]`)?.value.trim() || "";
       const roundDiff = rawRoundDiff === "" ? 0 : Number(rawRoundDiff);
       if (!Number.isInteger(roundDiff) || roundDiff < -99 || roundDiff > 99) return toast(`Enter a valid round difference for ${reg.teamName}.`, true);
-      results.push({ registrationId: reg.id, csResult: { outcome, roundDiff } });
+      if (outcome) results.push({ registrationId: reg.id, csResult: { outcome, roundDiff } });
     }
   }
+  if (!results.length) return toast("Enter at least one played match result before saving.", true);
   try {
     if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/match-results", { pin: currentAdminPin, results });
+      await apiPost("/api/admin/match-results", { pin: currentAdminPin, matchDate, results });
       await refreshStateFromServer();
       await renderAdminTables();
       renderLeaderboards("#admin-br-preview", "br");
       renderLeaderboards("#admin-cs-preview", "cs");
-      showAdminConfirmation("Match results published", "BR match points, the latest scored match, cumulative standings, and CS results are now updated on the leaderboard.");
+      showAdminConfirmation("Dated match results saved");
       return;
     }
     const state = loadState();
+    state.matchHistory = Array.isArray(state.matchHistory) ? state.matchHistory : [];
     results.forEach((item) => {
       const reg = (state.registrations || []).find((entry) => String(entry.id) === String(item.registrationId));
       if (!reg || String(reg.status || "").toLowerCase() !== "approved") return;
+      let mode = "br";
+      let brMatches = [];
+      let csResult = null;
+      let finalScore = null;
       if (item.matches) {
-        reg.brMatches = item.matches.map((match) => {
+        brMatches = item.matches.map((match) => {
           if (match.kills === null || match.position === null) return { kills: null, position: null, score: null };
           const score = Number(match.kills) + Number(DATA.scoring.br.placement[match.position] || 0);
           return { ...match, score };
         });
-        const scored = reg.brMatches.filter((match) => match.score !== null);
-        if (scored.length) {
-          reg.finalScore = scored.reduce((sum, match) => sum + match.score, 0);
-          reg.scoreUpdatedAt = new Date().toISOString();
-        } else delete reg.finalScore;
-        delete reg.csResult;
+        const scored = brMatches.filter((match) => match.score !== null);
+        finalScore = scored.reduce((sum, match) => sum + match.score, 0);
       } else {
-        reg.csResult = item.csResult.outcome ? { outcome: item.csResult.outcome, roundDiff: item.csResult.roundDiff } : {};
-        if (item.csResult.outcome) reg.finalScore = item.csResult.outcome === "Win" ? 3 : 0;
-        else delete reg.finalScore;
-        delete reg.brMatches;
+        mode = "cs";
+        csResult = { outcome: item.csResult.outcome, roundDiff: item.csResult.roundDiff };
+        finalScore = item.csResult.outcome === "Win" ? 3 : 0;
+      }
+      const stamp = new Date().toISOString();
+      const registrationId = String(reg.id || "");
+      const savedRow = {
+        registrationId,
+        entryKey: stableLocalEntryKey(registrationId),
+        date: matchDate,
+        mode,
+        teamName: reg.teamName,
+        modeLabel: reg.modeLabel,
+        format: reg.format,
+        formatLabel: reg.formatLabel,
+        variant: reg.variant,
+        roomId: reg.roomId,
+        roomTitle: reg.roomTitle,
+        slotNumber: reg.slotNumber,
+        slotCapacity: reg.slotCapacity,
+        scheduleSlotLabel: reg.scheduleSlotLabel,
+        scheduleTime: reg.scheduleTime,
+        players: (reg.players || []).map((player) => player.ign).filter(Boolean),
+        fee: reg.fee,
+        brMatches,
+        csResult,
+        finalScore,
+        lastMatchScore: [...brMatches].reverse().find((match) => match.score !== null)?.score ?? null,
+        csRoundDiff: csResult?.roundDiff ?? null,
+        scoreUpdatedAt: stamp
+      };
+      const index = state.matchHistory.findIndex((row) => String(row.registrationId) === registrationId && row.date === matchDate);
+      if (index >= 0) state.matchHistory[index] = savedRow;
+      else state.matchHistory.push(savedRow);
+      const latestDate = state.matchHistory.filter((row) => String(row.registrationId) === registrationId).map((row) => row.date).sort().at(-1);
+      if (!latestDate || matchDate >= latestDate) {
+        if (mode === "br") {
+          reg.brMatches = brMatches;
+          delete reg.csResult;
+        } else {
+          reg.csResult = csResult;
+          delete reg.brMatches;
+        }
+        reg.finalScore = finalScore;
+        reg.scoreUpdatedAt = stamp;
       }
     });
+    state.matchHistory.sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.registrationId).localeCompare(String(b.registrationId)));
     saveState(state);
     ADMIN_REGISTRATIONS = state.registrations || [];
     await renderAdminTables();
-    showAdminConfirmation("Match results saved on this device", "The points were calculated locally. A shared backend is needed to publish these results to all players.");
+    showAdminConfirmation("Dated results saved on this device");
   } catch (error) {
     toast(error.message || "Could not save match results.", true);
   }
 }
+
 async function updateRegistrationStatus(registrationId, status) {
   if (!registrationId) return;
-  if (SERVER_AVAILABLE && currentAdminPin) {
-    const result = await apiPost("/api/admin/registration-status", { pin: currentAdminPin, registrationId, status });
-    await refreshStateFromServer();
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      const result = await apiPost("/api/admin/registration-status", { pin: currentAdminPin, registrationId, status });
+      await refreshStateFromServer();
+      await renderAdminTables();
+      renderPage();
+      const slotText = result.registration?.slotNumber ? ` · slot ${result.registration.slotNumber}/${result.registration.slotCapacity}` : "";
+      showAdminConfirmation(`Registration ${status.toLowerCase()}${slotText}`);
+      return;
+    }
+    const state = loadState();
+    const reg = state.registrations.find((r) => r.id === registrationId);
+    if (!reg) throw new Error("Registration not found on this device.");
+    reg.status = status;
+    state.registrationCounts = {};
+    (state.registrations || []).forEach((entry) => {
+      if (String(entry.status || "Pending").toLowerCase() === "rejected") return;
+      state.registrationCounts[entry.roomId] = Number(state.registrationCounts[entry.roomId] || 0) + 1;
+    });
+    saveState(state);
     await renderAdminTables();
     renderPage();
-    const slotText = result.registration?.slotNumber ? ` Slot ${result.registration.slotNumber}/${result.registration.slotCapacity} assigned.` : "";
-    showAdminConfirmation(`Registration ${status.toLowerCase()}`, `The entry status was updated.${slotText}`);
-    return;
+    showAdminConfirmation(`Registration ${status.toLowerCase()} saved on this device`);
+  } catch (error) {
+    toast(error.message || "Could not update registration status.", true);
   }
-  const state = loadState();
-  const reg = state.registrations.find((r) => r.id === registrationId);
-  if (reg) reg.status = status;
-  state.registrationCounts = {};
-  (state.registrations || []).forEach((entry) => {
-    if (String(entry.status || "Pending").toLowerCase() === "rejected") return;
-    state.registrationCounts[entry.roomId] = Number(state.registrationCounts[entry.roomId] || 0) + 1;
-  });
-  saveState(state);
-  await renderAdminTables();
-  renderPage();
-  showAdminConfirmation(`Registration ${status.toLowerCase()} on this device`, "The change is local only. A shared backend is needed for players to see the approval status.");
 }
 
 function renderAdminSummaryCards(summary) {
@@ -1798,20 +2109,24 @@ async function exportRegistrationsCsv() {
 
 async function clearRegistrations() {
   if (!confirm("Clear registrations? This cannot be undone.")) return;
-  if (SERVER_AVAILABLE && currentAdminPin) {
-    await apiPost("/api/admin/clear-registrations", { pin: currentAdminPin });
-    await refreshStateFromServer();
-    renderAdminTables();
+  try {
+    if (SERVER_AVAILABLE && currentAdminPin) {
+      await apiPost("/api/admin/clear-registrations", { pin: currentAdminPin });
+      await refreshStateFromServer();
+      await renderAdminTables();
+      renderPage();
+      showAdminConfirmation("Registrations cleared");
+      return;
+    }
+    const state = loadState();
+    state.registrations = [];
+    saveState(state);
+    await renderAdminTables();
     renderPage();
-    showAdminConfirmation("Registrations cleared", "All registrations were removed from the shared server.");
-    return;
+    showAdminConfirmation("Registrations cleared on this device");
+  } catch (error) {
+    toast(error.message || "Could not clear registrations.", true);
   }
-  const state = loadState();
-  state.registrations = [];
-  saveState(state);
-  renderAdminTables();
-  renderPage();
-  showAdminConfirmation("Registrations cleared on this device", "Local registrations were removed. A shared backend is needed for shared updates.");
 }
 
 
@@ -1822,6 +2137,8 @@ function exportStateJson() {
     registrationCounts: state.registrationCounts,
     roomDetails: state.roomDetails,
     leaderboard: state.leaderboard,
+    matchHistory: state.matchHistory || [],
+    leaderboardSettings: state.leaderboardSettings || { defaultView: "latest" },
     notices: state.notices,
     exportedAt: new Date().toISOString()
   };
@@ -1841,11 +2158,13 @@ function importStateJson() {
     state.registrationCounts = incoming.registrationCounts || state.registrationCounts;
     state.roomDetails = incoming.roomDetails || state.roomDetails;
     state.leaderboard = incoming.leaderboard || state.leaderboard;
+    state.matchHistory = incoming.matchHistory || state.matchHistory;
+    state.leaderboardSettings = incoming.leaderboardSettings || state.leaderboardSettings;
     state.notices = incoming.notices || state.notices;
     saveState(state);
     renderAdminTables();
     renderPage();
-    showAdminConfirmation("Admin state imported", "The selected state was imported to this device.");
+    showAdminConfirmation("Admin state imported");
   } catch (error) {
     toast("Invalid JSON.", true);
   }
@@ -1860,7 +2179,7 @@ function resetAdminState() {
   saveState(state);
   renderAdminTables();
   renderPage();
-  showAdminConfirmation("Local admin state reset", "Room overrides, leaderboard entries, and notices were reset. Registrations were kept.");
+  showAdminConfirmation("Local admin state reset");
 }
 
 function downloadFile(filename, content, type) {
@@ -1893,7 +2212,7 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-function toast(message, isError = false) {
+function toast(message, isError = false, durationMs = null) {
   let el = $(".toast");
   if (!el) {
     el = document.createElement("div");
@@ -1901,10 +2220,15 @@ function toast(message, isError = false) {
     document.body.appendChild(el);
   }
   el.textContent = message;
+  el.setAttribute("role", isError ? "alert" : "status");
+  el.setAttribute("aria-live", isError ? "assertive" : "polite");
+  el.setAttribute("aria-atomic", "true");
   el.classList.toggle("error", isError);
+  el.classList.toggle("success", !isError);
   requestAnimationFrame(() => el.classList.add("show"));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 3200);
+  const duration = Number(durationMs) || (isError ? 4200 : 3000);
+  toastTimer = setTimeout(() => el.classList.remove("show"), duration);
 }
 
 document.addEventListener("DOMContentLoaded", pageInit);

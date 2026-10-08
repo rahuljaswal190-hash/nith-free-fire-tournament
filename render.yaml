@@ -1,3 +1,7 @@
+# This Blueprint intentionally stays on the Free plan and does not add a paid disk.
+# Free local files are ephemeral. For durable JSON state, explicitly upgrade the
+# existing service, attach a persistent disk at /var/data, and set
+# TOURNAMENT_DATA_DIR=/var/data in the service's environment settings.
 services:
   - type: web
     name: nith-free-fire-tournament

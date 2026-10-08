@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Admin tools for timings, registration edits, QR payments, room details, and verified match results." />
-  <link rel="stylesheet" href="styles.css?v=20261007-admin-confirm-v1" />
+  <link rel="stylesheet" href="styles.css?v=20261008-date-archive-v1" />
 </head>
 <body data-page="admin" id="top">
 <header class="site-header">
@@ -51,6 +51,7 @@
 
   <section class="section hidden" id="admin-panel">
     <div class="stats-grid" id="admin-live-summary"></div>
+    <p class="storage-status" id="admin-storage-status" role="status">Storage status will appear after the admin summary loads.</p>
     <div class="admin-grid">
       <article class="admin-box full">
         <h2>Set match timings (independent BR and CS schedules)</h2>
@@ -119,6 +120,17 @@
       </article>
 
       <article class="admin-box full">
+        <h2>Registration calendar</h2>
+        <p>Registration totals are grouped by submission date (IST). Select a day to inspect the entries received that day.</p>
+        <div class="calendar-toolbar">
+          <label>Calendar month<input id="registration-calendar-month" type="month" /></label>
+          <p id="registration-calendar-summary" class="disclaimer"></p>
+        </div>
+        <div id="registration-calendar" class="registration-calendar" aria-label="Registration counts by day"></div>
+        <div id="registrations-for-day" class="registrations-for-day"></div>
+      </article>
+
+      <article class="admin-box full">
         <h2>Registrations & approvals</h2>
         <div class="admin-actions">
           <button class="btn small" id="export-registrations" type="button">Export Registrations CSV</button>
@@ -130,8 +142,19 @@
       <article class="admin-box full">
         <h2>Enter verified match results</h2>
         <p>For each approved BR entry, enter kills and placement position for each of the 3 matches. Points are calculated automatically from kills plus the placement table. For CS, select Win/Loss and enter round difference. Saving publishes last-match details and cumulative standings; BR final score is never typed manually.</p>
+        <label class="result-date-control">Match date (IST)<input id="admin-result-date" type="date" /></label>
+        <p class="disclaimer">Results are archived by this date. Selecting an earlier date loads that day's saved values for correction without overwriting newer match results.</p>
         <div id="final-score-table"></div>
         <div class="admin-actions"><button class="btn small" id="save-final-scores" type="button">Save Match Results</button></div>
+      </article>
+
+      <article class="admin-box full">
+        <h2>Public leaderboard default</h2>
+        <p>Players can always choose a specific saved match date. Choose what they see when the page first opens.</p>
+        <div class="field-grid">
+          <label>Default public view<select id="leaderboard-default-view"><option value="latest">Latest match date</option><option value="all">All-time cumulative standings</option></select></label>
+        </div>
+        <div class="admin-actions"><button class="btn small" id="save-leaderboard-settings" type="button">Save Leaderboard Default</button></div>
       </article>
 
       <article class="admin-box full">
@@ -157,9 +180,11 @@
           <li><b>Set schedules:</b> select separate BR and CS start times, session lengths, and gaps. Three slots are retained for both modes; BR is 3 matches per slot and CS is 1.</li>
           <li><b>Verify payments:</b> publish the payment QR and/or UPI ID above. Players submit their UTR/reference. QR/UPI is not an automatic payment gateway; manually verify the reference before approving.</li>
           <li><b>Review registrations:</b> use Approve/Reject after checking the UTR. Edit names supports emoji and symbols; Remove deletes a registration and frees its reserved slot.</li>
-          <li><b>Enter results:</b> for BR, enter kills and placement for all three matches; the site calculates points from the placement table. For CS, choose Win/Loss and enter round difference. Save to publish cumulative standings and last-match details.</li>
+          <li><b>Enter dated results:</b> choose the match date first. BR uses kills and placement for three matches; CS uses Win/Loss and round difference. Previous dates remain archived when a newer date is saved.</li>
+          <li><b>Set leaderboard default:</b> players can choose a saved date; select whether the page opens on latest match results or all-time totals.</li>
+          <li><b>Use the registration calendar:</b> pick a month and click a date with a count to inspect entries received that day.</li>
+          <li><b>Keep storage durable:</b> host <code>server.py</code> on persistent storage and configure <code>TOURNAMENT_DATA_DIR</code>. Free ephemeral storage can be cleared on redeploy/restart; check the status notice above.</li>
           <li><b>Publish room access:</b> enter the custom Room ID/password and optionally upload a room QR. Details remain hidden until full-room release or you force release.</li>
-          <li><b>Use a shared backend:</b> host <code>server.py</code> to share admin changes and registrations across visitors. Static GitHub Pages does not provide live shared storage by itself.</li>
         </ol>
       </article>
     </div>
@@ -178,17 +203,7 @@
     </form>
   </div>
 </dialog>
-<dialog class="success-modal admin-confirmation-modal" id="admin-confirmation-modal" aria-labelledby="admin-confirmation-title" aria-describedby="admin-confirmation-message">
-  <div class="modal-inner admin-confirmation-inner">
-    <button class="modal-close" id="admin-confirmation-close" type="button" aria-label="Close confirmation">×</button>
-    <span class="success-icon" aria-hidden="true">✓</span>
-    <span class="eyebrow">Admin update confirmed</span>
-    <h2 id="admin-confirmation-title">Saved successfully</h2>
-    <p id="admin-confirmation-message" aria-live="polite">Your change was saved.</p>
-    <p class="disclaimer" id="admin-confirmation-time"></p>
-    <div class="modal-actions"><button class="btn small" id="admin-confirmation-ok" type="button">Continue</button></div>
-  </div>
-</dialog>
+
 <footer class="footer">
   <div>
     <strong data-event="name">NIT Hamirpur Free Fire Tournament</strong>
@@ -198,6 +213,6 @@
   <a href="#top">Back to top ↑</a>
 </footer>
 <script src="data.js?v=20261006-final-v6"></script>
-<script src="site.js?v=20261007-admin-confirm-v1"></script>
+<script src="site.js?v=20261008-date-archive-v1"></script>
 </body>
 </html>

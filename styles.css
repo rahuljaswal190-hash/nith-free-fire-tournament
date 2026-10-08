@@ -386,6 +386,8 @@ td { color: #d7deec; }
 .modal-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .toast { position: fixed; left: 50%; bottom: 22px; z-index: 100; max-width: min(580px, calc(100% - 28px)); padding: 13px 16px; border-radius: 999px; color: #160d04; background: linear-gradient(135deg, var(--fire), var(--orange)); font-weight: 950; text-align: center; box-shadow: 0 18px 50px rgba(0,0,0,.34); opacity: 0; transform: translateX(-50%) translateY(12px); transition: 180ms ease; pointer-events: none; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.success { color: #061108; background: linear-gradient(135deg, #8bffad, #37d978); }
+.toast.success::before { content: "✓"; margin-right: 8px; font-weight: 1000; }
 .toast.error { color: white; background: linear-gradient(135deg, #ff3f3f, #9b1111); }
 
 .reveal { opacity: 0; transform: translateY(18px); animation: reveal 700ms ease forwards; }
@@ -538,9 +540,45 @@ td small { color: var(--muted); }
   .admin-row-actions { min-width: 230px; }
 }
 
-/* Visible success acknowledgement for completed admin actions */
-.admin-confirmation-modal { width: min(520px, calc(100% - 28px)); }
-.admin-confirmation-inner .success-icon { margin-bottom: 14px; }
-.admin-confirmation-inner h2 { margin: 10px 42px 10px 0; }
-.admin-confirmation-inner > p { line-height: 1.65; }
-.admin-confirmation-inner .modal-actions { margin-top: 18px; }
+
+
+/* Dated leaderboards, registration calendar, and durable-storage status */
+.leaderboard-controls { display: grid; grid-template-columns: minmax(220px, .8fr) minmax(0, 1.4fr); align-items: end; gap: 22px; padding: 24px; }
+.leaderboard-controls h2 { margin: 14px 0 8px; }
+.leaderboard-controls p { margin-bottom: 0; }
+.leaderboard-filter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.leaderboard-filter-grid label, .calendar-toolbar label, .result-date-control { display: grid; gap: 7px; }
+.leaderboard-filter-grid input, .leaderboard-filter-grid select, .calendar-toolbar input, .result-date-control input { width: 100%; min-width: 0; }
+.result-date-control { width: min(100%, 340px); margin: 18px 0 8px; }
+.storage-status { margin: 16px 0 22px; padding: 12px 16px; border: 1px solid rgba(255, 176, 0, .32); border-radius: 14px; background: rgba(255, 176, 0, .07); color: #ffe0a0; font-size: .9rem; line-height: 1.5; }
+.storage-status.good { border-color: rgba(55, 255, 139, .35); background: rgba(55, 255, 139, .07); color: #b6ffd1; }
+.storage-status.warning { border-color: rgba(255, 176, 0, .4); }
+.calendar-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin: 14px 0; }
+.calendar-toolbar label { width: min(100%, 260px); }
+.calendar-toolbar p { margin: 0 0 8px; }
+.registration-calendar { max-width: 760px; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: rgba(0, 0, 0, .16); }
+.calendar-weekdays, .calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; }
+.calendar-weekdays { margin-bottom: 7px; }
+.calendar-weekdays span { padding: 8px 4px; color: var(--muted); font-size: .8rem; font-weight: 900; text-align: center; }
+.calendar-day, .calendar-blank { min-width: 0; min-height: 62px; }
+.calendar-day { display: grid; place-content: center; gap: 3px; border: 1px solid rgba(255,255,255,.10); border-radius: 12px; color: #d8deeb; background: rgba(255,255,255,.035); }
+.calendar-day small { color: var(--muted); font-size: .75rem; }
+.calendar-day.has-registrations { border-color: rgba(255,176,0,.35); color: #fff; background: rgba(255,176,0,.12); font-weight: 900; }
+.calendar-day.has-registrations small { color: #ffe0a0; }
+.calendar-day.selected { outline: 2px solid var(--fire); outline-offset: 1px; }
+.calendar-day:disabled { cursor: default; opacity: .45; }
+.registrations-for-day { margin-top: 18px; }
+.registrations-for-day h3 { margin-bottom: 12px; }
+
+@media (max-width: 900px) {
+  .leaderboard-controls { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .leaderboard-filter-grid { grid-template-columns: 1fr; }
+  .calendar-toolbar { align-items: flex-start; flex-direction: column; }
+  .calendar-toolbar label { width: 100%; }
+  .calendar-day, .calendar-blank { min-height: 48px; }
+  .registration-calendar { padding: 9px; }
+  .calendar-weekdays, .calendar-days { gap: 4px; }
+  .calendar-day { border-radius: 9px; font-size: .9rem; }
+}
