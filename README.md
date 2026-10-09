@@ -43,27 +43,43 @@ TOURNAMENT_DATA_DIR=/mnt/tournament-data python3 server.py
 
 Alternatively, set `TOURNAMENT_DATA_FILE` to the exact JSON file path. The server writes an atomic state file and retains the previous valid copy as `server-data.json.bak`. When a new data directory is configured, an existing legacy `server-data.json` is migrated on first load if it is still present. The most recent result stored on each legacy registration is also migrated into the new dated history using its score timestamp; older days that were already overwritten cannot be reconstructed. Keep an additional off-host backup too; the `.bak` copy is not protection against deleting the entire volume.
 
-Set a private admin PIN in the host environment as `TOURNAMENT_ADMIN_PIN` before inviting players. Do not publish the PIN. If unset, the fallback PIN is `2026`.
+## Admin authentication and security
+
+There is no hard-coded or browser-side admin password. The server accepts an admin passphrase only after checking a salted PBKDF2-HMAC-SHA256 verifier held in `TOURNAMENT_ADMIN_PASSWORD_HASH`. Generate one interactively with:
+
+```bash
+python3 generate_admin_hash.py
+```
+
+Use a unique passphrase of at least 16 characters. The script prompts without echoing it and prints a verifier; copy the verifier directly to the host environment variable. Never commit a plaintext password, verifier, API key, `.env`, or registration JSON. Remove any old `TOURNAMENT_ADMIN_PIN` environment variable after configuring the new hash; the new code does not use it. If the verifier is unset, admin sign-in is disabled (public pages can still run).
+
+Successful sign-in creates an 8-hour, server-side session and an `HttpOnly`, `SameSite=Strict`, `Secure` cookie on HTTPS. Admin writes require a per-session CSRF token and same-origin requests. Login attempts and API routes are rate-limited. Offline/browser-only admin writes are disabled on HTTP(S) so a local browser fallback cannot bypass the server.
+
+The server sends CSP and other security headers, rejects cross-origin API writes, accepts JSON objects only, validates/sanitizes submitted fields server-side, and serves only an explicit allowlist of public HTML/JS/CSS files. State JSON and temporary/backup files are written with owner-only permissions where supported. Public `/api/state` intentionally contains public tournament data (published payment instructions/QR, approved leaderboard names/scores, and room credentials only when released); pending registration contact/payment-reference details remain admin-only.
+
+Rate limiting and sessions are in-memory and reset on a process restart; they are suitable as a lightweight single-instance safeguard, not a substitute for a managed WAF/identity provider. HTTPS is expected in production; Render provides TLS termination. This project has no API keys or third-party dependencies. The JSON file is not a database and Render Free storage remains ephemeral.
+
+The local workspace has no `.git` metadata, so its historical commits cannot be scanned here. If you publish this source in a Git repository, use secret scanning and rotate any credential that was ever committed; deleting it from the current files alone does not remove it from Git history.
 
 ## Important: persistent storage on Render
 
-The included `render.yaml` **intentionally remains on Render’s Free plan**; it does not silently opt you into a paid instance or configure a disk. Render Free local files are not a durable storage guarantee. Until you explicitly attach a persistent volume and set its path, the admin panel will warn that storage is not persistent.
+The included `render.yaml` **intentionally remains on Render’s Free plan**; it does not silently opt you into a paid instance or configure storage. This version writes state to a local JSON file, and Render Free local files are not durable. A durable Render Free setup needs integration with an external database/store; that integration is not included. Merely setting `TOURNAMENT_DATA_DIR` does not make Free storage persistent. The admin panel warns when it cannot detect a mounted volume.
 
-For durable payment settings, QR images, registrations and match history on Render:
+**Optional paid-disk path only if you explicitly authorize a plan change:** to keep this JSON-backed version on Render with durable payment settings, QR images, registrations and match history:
 
-1. In Render, upgrade the existing web service to a plan that supports persistent disks. Persistent disks are a paid hosting feature; check the current price shown in your Render dashboard before confirming. This project does not upgrade or add that paid resource automatically.
+1. In Render, the existing web service must be on a plan that supports persistent disks. Persistent disks are a paid hosting feature; check the current price shown in your Render dashboard before confirming. This project does not upgrade or add that paid resource automatically.
 2. Add a persistent disk to the **existing** web service, with mount path **`/var/data`** (1 GB is sufficient to start for this JSON-backed site).
 3. In the service’s environment settings, set **`TOURNAMENT_DATA_DIR=/var/data`**. It is intentionally not set by the Free-plan Blueprint.
 4. Redeploy and open `admin.html`. The storage status should say **“Mounted volume detected”**. The startup log also prints the active state-file path, expected as `/var/data/server-data.json`.
 5. Keep the same service and disk when replacing site files. Back up `server-data.json` and `server-data.json.bak` to a separate location periodically.
 
-If you keep the service on Free without an attached persistent disk, the app can still run, but local JSON state may disappear on a restart or redeploy. Merely changing the JSON/backup code cannot make an ephemeral host durable. If the previous deployment has already deleted its only copy, this ZIP cannot recover that lost file; restore from any server backup or export you retained. On first startup with the new volume, the app will migrate the old app-directory JSON if it still exists.
+If you keep the service on Free without a durable external store, the app can still run, but local JSON state may disappear on a restart or redeploy. Merely changing the JSON/backup code or setting a data-directory environment variable cannot make an ephemeral host durable. The browser’s Admin State JSON import/export is only a partial local transfer; it omits registrations and payment settings and is not a recovery backup. If the previous deployment has already deleted its only copy, this ZIP cannot recover that lost file; only a complete server backup can. On first startup with a persistent volume, the app will migrate the old app-directory JSON if it still exists.
 
 For other hosts, point `TOURNAMENT_DATA_DIR` at the host’s persistent mounted storage and confirm the admin panel detects it. A configured folder alone is not a guarantee if the host does not persist it.
 
 ## Admin workflow
 
-1. Open `admin.html`, enter the server’s admin PIN, and unlock the controls.
+1. Open `admin.html`, enter the configured admin passphrase, and sign in. The browser receives a short-lived secure session cookie; no password is stored in `data.js`.
 2. **Set match timings:** BR and CS each have their own start time, session duration (1 or 2 hours), and inter-slot gap (0, 1, or 2 hours). Times use IST. The three room suffixes map to Slot 1, Slot 2, and Slot 3.
 3. **Publish payment details:** upload an optional PNG/JPG/WebP payment QR (maximum 1 MB), enter an optional payee name and/or UPI ID, and add instructions. Payment details remain in server state until an admin changes or removes them. Their survival across host restarts still depends on the persistent-storage setup above.
 4. **Verify a registration:** review the submitted UTR/reference and manually confirm payment. QR/UPI instructions do **not** provide automatic payment verification; entries stay pending until the organizer approves them.
@@ -73,6 +89,7 @@ For other hosts, point `TOURNAMENT_DATA_DIR` at the host’s persistent mounted 
 8. **Manage room details:** select the correct mode, format/team size, fee, and Normal/One Tap type before saving a Room ID/password and optional QR. “Remove Saved Room Details” unpublishes and deletes only those credentials; registrations remain unchanged.
 9. **Choose the public default:** select either the latest saved match date or all-time cumulative standings. Visitors can also enter any date on the public leaderboard; unavailable dates show a clear empty state.
 10. **Read save confirmations:** successful admin actions show a compact auto-dismiss toast for about 2.5 seconds. Failed saves show an error toast and do not show a success confirmation.
+11. **Use State JSON carefully:** the browser Import/Export section moves only selected local counts/leaderboard/history settings. It is not a full server backup, excludes registrations and payment settings, and must not be used to recover live data or committed to `data.js`.
 
 All-time BR totals add the saved date totals; the match cells show the most recent saved session. All-time CS totals add win points and use combined round difference as a tiebreaker. Public leaderboard history contains roster names/results, not player IDs, WhatsApp numbers or payment references.
 
@@ -87,24 +104,22 @@ All-time BR totals add the saved date totals; the match cells show the most rece
 
 1. Extract the complete updated ZIP.
 2. Replace the previous site files with the extracted files as one set; do not keep an old `data.js`, `site.js`, `server.py`, page HTML, or `styles.css` alongside the new files.
-3. Keep the existing Render Free service unchanged unless you explicitly choose to upgrade. For durable data, follow the paid-disk steps above; do not collect real registrations until the admin status reports a mounted persistent volume.
-4. Set `TOURNAMENT_ADMIN_PIN` to a new private value and start with `python server.py` (or use the included Render configuration).
+3. Keep the existing Render service on Free unless you explicitly authorize a plan change. This JSON-backed version cannot guarantee durable records on Render Free; a durable Free setup needs external-store integration, which is not included. Do not treat the browser’s partial State JSON export as a full backup or recovery path.
+4. Generate a new hash with `python3 generate_admin_hash.py`; set `TOURNAMENT_ADMIN_PASSWORD_HASH` in the host environment before deploying this version. Remove the unused legacy `TOURNAMENT_ADMIN_PIN` variable after verifying sign-in. Never send the password or verifier in chat or commit either value.
 5. After deployment, test the public registration, status check, admin approval, payment instructions, date selection, dated result publishing, calendar and storage-status message.
 6. Static hosting such as GitHub Pages alone does not provide shared, durable registration/admin storage. Use the included Python backend for shared live behavior.
 
 ## Files changed in this update
 
-- `data.js` — CS team sizes, separate size-specific rooms, and legacy squad room-ID compatibility
-- `clash-squad.html` — selectable 1v1/2v2/3v3/4v4 forms with size-specific rosters and per-side fees
-- `site.js` — dynamic CS rosters, date-linked admin calendar/results, public date empty states, and room-details removal control
-- `server.py` — CS roster-size validation, two-side capacity, and an authenticated room-details deletion endpoint; existing durable storage and dated archives remain
-- `admin.html` — CS team-size room controls, calendar counts/empty states, selectable result dates, and remove-details action
-- `leaderboard.html` — public match-date, latest, and all-time controls remain available
-- `styles.css` — calendar, date filter, storage-status, and toast styling
-- `render.yaml` — explicitly documents the existing Free/ephemeral setup; no paid plan or disk is enabled
-- `.gitignore` — excludes JSON state and its backup/temp files
-- `tests/test_server_api.py` — regression coverage for persistence, archives, settings, size-specific CS rosters, capacity and room-detail removal
-- `README.md` — deployment, storage and feature documentation
+- `server.py` — password-hash auth, server-side sessions/CSRF, same-origin and JSON validation, rate limits, security headers, static-file allowlist, bounded request threads/socket timeout, safer state-file writes, and existing tournament API behavior
+- `site.js` — server-backed admin login/logout, fail-closed admin writes, and local State JSON export that omits room credentials
+- `data.js` — removed the exposed client-side admin credential; tournament formats and room configuration remain
+- `admin.html`, `admin-dashboard.html` — passphrase sign-in/sign-out and clear limits for partial State JSON export/import
+- `generate_admin_hash.py` — interactive salted PBKDF2 verifier generator
+- `render.yaml` — remains on Render Free; no paid plan, disk, or secret value is enabled
+- `.gitignore` — excludes local environment/secrets, runtime JSON, backups, temporary files, and key files
+- `README.md`, `PHONE_EDITING_GUIDE.md`, `SECURITY_AUDIT.md` — authentication, backup, Render Free, deployment and verification guidance
+- `tests/test_server_api.py` — 27 API/security regression tests, including bounded-server configuration, safe State JSON transfer, and tournament behavior
 
 ## Tests
 
@@ -117,8 +132,8 @@ node --check data.js
 python3 -m py_compile server.py
 ```
 
-The API regression suite covers payment QR persistence/backup recovery, legacy-file migration, dated result archives/backfills, leaderboard defaults, schedules, manual payment approval, BR scoring, variable-size and legacy CS rosters, two-side room capacity, room-QR privacy/release and removal, emoji edits, and registration removal.
+The 27-test API/security regression suite covers password-hash/session/CSRF/rate-limit behavior, same-origin and JSON checks, static-file restrictions, safe partial State JSON transfer, bounded-server configuration, payment QR persistence/backup recovery, legacy-file migration, dated results, leaderboard defaults, schedules, manual payment approval, BR scoring, variable-size and legacy CS rosters, room capacity/privacy, emoji edits, and registration removal.
 
 ## Privacy and event wording
 
-Registration records contain player names/IDs, contact numbers and payment references. Restrict server and admin-PIN access. Share room credentials only with the registered players who need them. Keep all event copy as student-organized and do not imply institute/Garena/Free Fire approval.
+Registration records contain player names/IDs, contact numbers and payment references. Restrict server and admin-passphrase access. Share room credentials only with the registered players who need them. Keep all event copy as student-organized and do not imply institute/Garena/Free Fire approval.

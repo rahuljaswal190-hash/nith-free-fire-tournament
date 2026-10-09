@@ -33,21 +33,22 @@
     <div class="reveal">
       <span class="eyebrow">Admin dashboard</span>
       <h1 class="page-title">Live registrations, players and <span>payment totals</span>.</h1>
-      <p class="page-lead">Unlock with the admin PIN set in Render under TOURNAMENT_ADMIN_PIN to see registrations, approved players, and payment totals.</p>
+      <p class="page-lead">Sign in with your private admin passphrase to view registrations and payment totals. The server validates a PBKDF2-SHA256 hash configured in Render; there is no default password.</p>
     </div>
   </section>
 
-  <section class="section">
+  <section class="section" id="dashboard-login-box">
     <div class="admin-box">
-      <h2>Unlock dashboard</h2>
+      <h2>Admin sign-in</h2>
       <div class="filters">
-        <label>Admin PIN<input id="dashboard-pin" type="password" inputmode="numeric" placeholder="Enter PIN" /></label>
-        <button class="btn" id="dashboard-unlock" type="button">Unlock Dashboard</button>
+        <label>Admin password<input id="dashboard-password" type="password" autocomplete="current-password" minlength="16" maxlength="1024" placeholder="Enter your passphrase" /></label>
+        <button class="btn" id="dashboard-unlock" type="button">Sign in</button>
       </div>
     </div>
   </section>
 
   <section class="section hidden" id="dashboard-panel">
+    <div class="admin-actions"><button class="btn small ghost" id="dashboard-logout" type="button">Sign out</button></div>
     <div class="stats-grid" id="admin-live-summary"></div>
     <div class="admin-box full">
       <h2>Registered entries</h2>

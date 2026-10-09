@@ -4,7 +4,7 @@ let toastTimer;
 let lastSummary = "";
 let SERVER_AVAILABLE = false;
 let SERVER_STATE = null;
-let currentAdminPin = "";
+let currentAdminCsrf = "";
 let liveSyncTimer = null;
 let ADMIN_REGISTRATIONS = [];
 let ADMIN_SUMMARY = null;
@@ -67,6 +67,9 @@ function loadState() {
 }
 
 function saveState(state) {
+  if (["admin", "dashboard"].includes(document.body?.dataset?.page) && location.protocol !== "file:" && (!SERVER_AVAILABLE || !currentAdminCsrf)) {
+    throw new Error("Admin changes require an authenticated live server session; no local fallback was saved.");
+  }
   state.updatedAt = new Date().toISOString();
   localStorage.setItem(STATE_KEY, JSON.stringify(state));
 }
@@ -85,14 +88,52 @@ async function refreshStateFromServer() {
 }
 
 async function apiPost(path, payload) {
+  const headers = { "Content-Type": "application/json" };
+  if (path.startsWith("/api/admin/") && path !== "/api/admin/login" && currentAdminCsrf) {
+    headers["X-CSRF-Token"] = currentAdminCsrf;
+  }
   const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    cache: "no-store",
+    headers,
     body: JSON.stringify(payload || {})
   });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401 && path.startsWith("/api/admin/") && path !== "/api/admin/login") {
+    currentAdminCsrf = "";
+  }
   if (!response.ok || data.ok === false) throw new Error(data.error || `Request failed (${response.status})`);
   return data;
+}
+
+async function restoreAdminSession() {
+  try {
+    const response = await fetch("/api/admin/session", { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) return false;
+    const data = await response.json();
+    if (!data?.ok || typeof data.csrfToken !== "string" || !data.csrfToken) return false;
+    currentAdminCsrf = data.csrfToken;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function signOutAdmin() {
+  try {
+    if (currentAdminCsrf) await apiPost("/api/admin/logout", {});
+  } catch {
+    // Clear local admin UI even if the session already expired or the server is offline.
+  }
+  currentAdminCsrf = "";
+  $("#admin-panel")?.classList.add("hidden");
+  $("#dashboard-panel")?.classList.add("hidden");
+  $("#admin-login-box")?.classList.remove("hidden");
+  $("#dashboard-login-box")?.classList.remove("hidden");
+  if ($("#admin-password")) $("#admin-password").value = "";
+  if ($("#dashboard-password")) $("#dashboard-password").value = "";
+  toast("Signed out.");
 }
 
 
@@ -280,7 +321,7 @@ function startLiveSync() {
     const ok = await refreshStateFromServer();
     if (ok) {
       renderNotices();
-      if (page === "dashboard" && currentAdminPin) {
+      if (page === "dashboard" && currentAdminCsrf) {
         renderDashboardData().catch(() => {});
       } else if (page === "status" && lastStatusSearch) {
         apiPost("/api/check-status", lastStatusSearch).then(renderStatusResult).catch(() => {});
@@ -688,6 +729,9 @@ async function submitRegistration(data) {
   if (SERVER_AVAILABLE) {
     const result = await apiPost("/api/register", data);
     return { message: result.message || "Registration received on the live server.", registration: result.registration };
+  }
+  if (location.protocol !== "file:") {
+    throw new Error("The live registration server is unavailable. No registration was sent; please try again shortly.");
   }
   const state = loadState();
   const room = getRoom(data.roomId);
@@ -1099,24 +1143,49 @@ function renderRoomDetailsPage() {
 
 function setupDashboardPage() {
   const unlock = $("#dashboard-unlock");
-  const pin = $("#dashboard-pin");
+  const password = $("#dashboard-password");
+  const loginBox = $("#dashboard-login-box");
   const panel = $("#dashboard-panel");
-  if (!unlock || !panel) return;
-  unlock.addEventListener("click", async () => {
-    currentAdminPin = pin.value.trim();
+  if (!unlock || !panel || unlock.dataset.bound === "true") return;
+  unlock.dataset.bound = "true";
+  const signIn = async () => {
+    if (!SERVER_AVAILABLE) {
+      toast("The live server is unavailable. Admin access is disabled until it reconnects.", true);
+      return;
+    }
     try {
-      await renderDashboardData();
+      const result = await apiPost("/api/admin/login", { password: password?.value || "" });
+      currentAdminCsrf = result.csrfToken || "";
+      if (password) password.value = "";
+      loginBox?.classList.add("hidden");
       panel.classList.remove("hidden");
+      await renderDashboardData();
       toast("Dashboard unlocked.");
     } catch (error) {
-      toast("Wrong admin PIN or server unavailable.", true);
+      currentAdminCsrf = "";
+      toast(error.message || "Sign-in failed.", true);
+    }
+  };
+  unlock.addEventListener("click", signIn);
+  password?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") signIn();
+  });
+  $("#dashboard-logout")?.addEventListener("click", signOutAdmin);
+  restoreAdminSession().then(async (restored) => {
+    if (!restored) return;
+    loginBox?.classList.add("hidden");
+    panel.classList.remove("hidden");
+    try {
+      await renderDashboardData();
+    } catch {
+      await signOutAdmin();
     }
   });
 }
 
 async function renderDashboardData() {
   if (!SERVER_AVAILABLE) throw new Error("Live server unavailable");
-  const summary = await apiPost("/api/admin/summary", { pin: currentAdminPin });
+  const summary = await apiPost("/api/admin/summary", {});
   renderAdminSummaryCards(summary);
   const table = $("#dashboard-registrations");
   if (table) {
@@ -1460,39 +1529,44 @@ function populateAdminSettingsFromSummary(summary = {}) {
 
 function setupAdminPage() {
   const unlock = $("#admin-unlock");
-  const pin = $("#admin-pin");
+  const password = $("#admin-password");
+  const loginBox = $("#admin-login-box");
   const panel = $("#admin-panel");
   if (!unlock || !panel || unlock.dataset.bound === "true") return;
   unlock.dataset.bound = "true";
 
-  unlock.addEventListener("click", async () => {
-    const enteredPin = pin.value.trim();
-    if (SERVER_AVAILABLE) {
-      try {
-        await apiPost("/api/admin/summary", { pin: enteredPin });
-        currentAdminPin = enteredPin;
-        panel.classList.remove("hidden");
-        renderAdminPanel();
-        toast("Admin controls unlocked. Live server mode is active.");
-        return;
-      } catch (error) {
-        toast("Wrong admin PIN.", true);
-        return;
-      }
-    }
-    if (enteredPin !== DATA.event.adminPin) {
-      toast("Wrong admin PIN.", true);
+  const signIn = async () => {
+    if (!SERVER_AVAILABLE) {
+      toast("The live server is unavailable. Admin access is disabled until it reconnects.", true);
       return;
     }
-    currentAdminPin = enteredPin;
+    try {
+      const result = await apiPost("/api/admin/login", { password: password?.value || "" });
+      currentAdminCsrf = result.csrfToken || "";
+      if (password) password.value = "";
+      loginBox?.classList.add("hidden");
+      panel.classList.remove("hidden");
+      renderAdminPanel();
+      toast("Admin controls unlocked. Live server mode is active.");
+    } catch (error) {
+      currentAdminCsrf = "";
+      toast(error.message || "Sign-in failed.", true);
+    }
+  };
+
+  unlock.addEventListener("click", signIn);
+  password?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") signIn();
+  });
+  $("#admin-logout")?.addEventListener("click", signOutAdmin);
+  setupAdminListeners();
+  restoreAdminSession().then((restored) => {
+    if (!restored) return;
+    loginBox?.classList.add("hidden");
     panel.classList.remove("hidden");
     renderAdminPanel();
-    toast("Admin controls unlocked on this device.");
   });
-
-  setupAdminListeners();
 }
-
 
 function setupAdminListeners() {
   $("#admin-mode")?.addEventListener("change", () => { const mode = $("#admin-mode")?.value || "br"; populateFeeSelect($("#admin-fee"), getFeeTiers(mode)[0], mode); updateAdminRoomChoices(); });
@@ -1577,8 +1651,8 @@ async function saveAdminRoomCount() {
   const count = Number($("#admin-confirmed-count")?.value || 0);
   if (count < 0 || count > room.capacity) return toast(`Count must be between 0 and ${room.capacity}.`, true);
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/room-count", { pin: currentAdminPin, roomId: room.id, count });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/room-count", { roomId: room.id, count });
       await refreshStateFromServer();
       await renderAdminTables();
       renderPage();
@@ -1677,8 +1751,8 @@ async function saveRoomDetails() {
   if (!roomId || !customRoomId || !password) return toast("Select room and enter room ID plus password.", true);
   const detail = { roomId, customRoomId, password, message, roomQrDataUrl: ROOM_QR_DATA, forcePublish, published, updatedAt: new Date().toISOString() };
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/room-details", { pin: currentAdminPin, detail });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/room-details", { detail });
       await refreshStateFromServer();
       await renderAdminTables();
       renderPage();
@@ -1708,8 +1782,8 @@ async function removeRoomDetails() {
   const room = getRoom(roomId);
   if (!confirm(`Remove saved room ID, password, and QR for ${room?.title || roomId}? This will hide them from the public Room Details page. Registrations will not be changed.`)) return;
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/delete-room-details", { pin: currentAdminPin, roomId });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/delete-room-details", { roomId });
       await refreshStateFromServer();
       await renderAdminTables();
       renderPage();
@@ -1756,8 +1830,8 @@ async function saveLeaderboardSettings() {
   const defaultView = $("#leaderboard-default-view")?.value || "latest";
   if (!["latest", "all"].includes(defaultView)) return toast("Choose a valid public leaderboard view.", true);
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/leaderboard-settings", { pin: currentAdminPin, settings: { defaultView } });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/leaderboard-settings", { settings: { defaultView } });
       await refreshStateFromServer();
       await renderAdminTables();
       showAdminConfirmation("Leaderboard default saved");
@@ -1776,8 +1850,8 @@ async function saveLeaderboardSettings() {
 async function saveScheduleSettings() {
   const settings = adminScheduleSettingsFromControls();
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/schedule-settings", { pin: currentAdminPin, settings });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/schedule-settings", { settings });
       await refreshStateFromServer();
       await renderAdminTables();
       renderSchedulePage();
@@ -1806,8 +1880,8 @@ async function savePaymentSettings() {
     qrDataUrl: PAYMENT_QR_DATA
   };
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/payment-settings", { pin: currentAdminPin, settings });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/payment-settings", { settings });
       await refreshStateFromServer();
       await renderAdminTables();
       $$('[data-registration-form]').forEach(renderPaymentInstructions);
@@ -1828,9 +1902,9 @@ async function savePaymentSettings() {
 async function renderAdminTables() {
   let state = loadState();
   let summaryForCards = null;
-  if (SERVER_AVAILABLE && currentAdminPin) {
+  if (SERVER_AVAILABLE && currentAdminCsrf) {
     try {
-      const summary = await apiPost("/api/admin/summary", { pin: currentAdminPin });
+      const summary = await apiPost("/api/admin/summary", {});
       summaryForCards = summary;
       ADMIN_SUMMARY = summary;
       state = normalizeState({ ...loadState(), registrations: summary.registrations || [] });
@@ -1943,8 +2017,8 @@ async function saveRegistrationEdits(event) {
   if (players.some((player, index) => index > 0 && !player.remove && !player.ign)) return toast("Fill a name or choose Remove for each teammate.", true);
   const payload = { registrationId: reg.id, teamName, iglName: players[0].ign, players };
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/edit-registration", { pin: currentAdminPin, ...payload });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/edit-registration", { ...payload });
       await refreshStateFromServer();
     } else {
       const state = loadState();
@@ -1973,8 +2047,8 @@ async function deleteRegistration(registrationId) {
   if (!reg) return toast("Registration not found.", true);
   if (!confirm(`Remove ${reg.teamName || "this registration"}? This frees the reserved lobby slot and cannot be undone.`)) return;
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/delete-registration", { pin: currentAdminPin, registrationId });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/delete-registration", { registrationId });
       await refreshStateFromServer();
     } else {
       const state = loadState();
@@ -2062,8 +2136,8 @@ async function saveFinalScores() {
   }
   if (!results.length) return toast("Enter at least one played match result before saving.", true);
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/match-results", { pin: currentAdminPin, matchDate, results });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/match-results", { matchDate, results });
       await refreshStateFromServer();
       await renderAdminTables();
       renderLeaderboards("#admin-br-preview", "br");
@@ -2149,8 +2223,8 @@ async function saveFinalScores() {
 async function updateRegistrationStatus(registrationId, status) {
   if (!registrationId) return;
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      const result = await apiPost("/api/admin/registration-status", { pin: currentAdminPin, registrationId, status });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      const result = await apiPost("/api/admin/registration-status", { registrationId, status });
       await refreshStateFromServer();
       await renderAdminTables();
       renderPage();
@@ -2205,8 +2279,8 @@ function playerListHtml(reg) {
 
 async function exportRegistrationsCsv() {
   let state = loadState();
-  if (SERVER_AVAILABLE && currentAdminPin) {
-    const summary = await apiPost("/api/admin/summary", { pin: currentAdminPin });
+  if (SERVER_AVAILABLE && currentAdminCsrf) {
+    const summary = await apiPost("/api/admin/summary", {});
     state = normalizeState({ ...state, registrations: summary.registrations || [] });
   }
   if (!state.registrations.length) return toast("No registrations to export.", true);
@@ -2224,8 +2298,8 @@ async function exportRegistrationsCsv() {
 async function clearRegistrations() {
   if (!confirm("Clear registrations? This cannot be undone.")) return;
   try {
-    if (SERVER_AVAILABLE && currentAdminPin) {
-      await apiPost("/api/admin/clear-registrations", { pin: currentAdminPin });
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/clear-registrations", {});
       await refreshStateFromServer();
       await renderAdminTables();
       renderPage();
@@ -2246,10 +2320,10 @@ async function clearRegistrations() {
 
 function exportStateJson() {
   const state = loadState();
+  // Room details are intentionally excluded because exports may be shared or committed.
   const exportable = {
     roomOverrides: state.roomOverrides,
     registrationCounts: state.registrationCounts,
-    roomDetails: state.roomDetails,
     leaderboard: state.leaderboard,
     matchHistory: state.matchHistory || [],
     leaderboardSettings: state.leaderboardSettings || { defaultView: "latest" },
@@ -2270,7 +2344,6 @@ function importStateJson() {
     const state = loadState();
     state.roomOverrides = incoming.roomOverrides || state.roomOverrides;
     state.registrationCounts = incoming.registrationCounts || state.registrationCounts;
-    state.roomDetails = incoming.roomDetails || state.roomDetails;
     state.leaderboard = incoming.leaderboard || state.leaderboard;
     state.matchHistory = incoming.matchHistory || state.matchHistory;
     state.leaderboardSettings = incoming.leaderboardSettings || state.leaderboardSettings;

@@ -77,7 +77,6 @@
       supportChannel: "Organizer WhatsApp/contact to be added",
       whatsappNumber: "",
       upiId: "",
-      adminPin: "2026",
       disclaimer: "This is a student-organized tournament around NIT Hamirpur. It is not affiliated with, endorsed by, or sponsored by Garena or Free Fire."
     },
     economics: {

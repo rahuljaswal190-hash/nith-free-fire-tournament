@@ -1,14 +1,14 @@
 # Phone admin and deployment guide — Variable CS & date controls
 
-The admin panel works with the live Python backend. Default PIN: `2026`; set a private `TOURNAMENT_ADMIN_PIN` before deployment and do not share it. A static GitHub Pages copy alone cannot save shared registrations or admin changes.
+The secured admin panel requires the live Python backend; there is no default password and no offline admin mode. A static GitHub Pages copy alone cannot save shared registrations or admin changes. Do not send passwords, password hashes, or environment-variable values in chat.
 
 ## Replace/deploy the update
 
-1. Download and extract the latest complete update ZIP.
-2. Replace the previous website files with the complete extracted set. Do not mix old `site.js`, `data.js`, `server.py`, or HTML files with the new ones.
-3. Deploy the folder to a Python-capable host (the included `render.yaml` is configured for Render). Use `python server.py` as the start command.
-4. Set `TOURNAMENT_ADMIN_PIN` to a private value. Enable persistent storage for `server-data.json` so registrations, settings and QR images survive restarts.
-5. Open `/admin.html`, enter the PIN, and test the controls before sharing the site.
+1. Before deploying, preserve a complete server-state backup using a trusted host/backend method. The Admin State JSON import/export is only a partial local transfer and omits registrations and payment settings; it is not a recovery backup. Render Free redeploys/spin-downs may clear app-local JSON data. This update does not change the plan or add paid storage; if no complete backup exists, do not assume the browser export can recover the live state.
+2. Download and extract the latest complete update ZIP. Replace the previous website files with the complete extracted set; do not mix old `site.js`, `data.js`, `server.py`, or HTML files with the new ones.
+3. On a trusted computer, run `python3 generate_admin_hash.py`. It prompts for a unique passphrase (minimum 16 characters) without echoing it and outputs a salted PBKDF2-SHA256 verifier. Do not paste the plaintext passphrase or verifier into this chat or source files.
+4. In Render → existing service → **Environment**, add `TOURNAMENT_ADMIN_PASSWORD_HASH` with the generated verifier. The new code ignores the old `TOURNAMENT_ADMIN_PIN`; remove that old variable after confirming the new sign-in works. Set the environment variable before deploying, or admin sign-in will remain disabled.
+5. Deploy to the existing service only after preserving needed records. Open `/admin.html`, sign in with the passphrase, and test before sharing the site. Render Free has no Shell or persistent disk; a configured JSON path alone does not make data durable.
 
 ## Admin controls from your phone
 
@@ -29,6 +29,9 @@ The admin panel works with the live Python backend. Default PIN: `2026`; set a p
 
 ## Backups and security
 
-- Use the host’s persistent storage for `server-data.json`; it includes registrations, payment references, private room details and QR images.
-- Back up the data file securely and limit access to the PIN.
+- `server-data.json` contains player IDs, contact numbers, payment references, admin-only room details, payment settings, and QR images. Keep full backups encrypted/private and avoid posting the file in public channels. Payment settings remain until changed/removed only while the underlying state storage survives.
+- The Admin State JSON import/export is partial: it excludes registrations and payment settings. Do not use it to recover the server or paste/commit exported data into `data.js`.
+- Admin authentication now uses PBKDF2-SHA256 password verification, short-lived server-side sessions, HttpOnly/SameSite cookies, CSRF checks, same-origin API writes, login/API rate limits, and security headers. Sign out on shared devices.
+- Only released room credentials and intended public tournament/leaderboard/payment information are visible to visitors. Pending registration contact/payment details require an admin session.
+- Render Free storage is ephemeral and has no Shell or persistent disk. For long-term persistence while staying Free, the app needs an external durable database/store and regular off-host backups; this ZIP does not silently upgrade or attach paid storage.
 - Keep the event described as student-organized. Do not imply NIT Hamirpur, Garena, or Free Fire approval or endorsement.

@@ -38,18 +38,19 @@
     </div>
   </section>
 
-  <section class="section">
+  <section class="section" id="admin-login-box">
     <div class="admin-box">
-      <h2>Unlock admin panel</h2>
-      <p>Enter the admin PIN set in Render under <code>TOURNAMENT_ADMIN_PIN</code>. If you did not set that environment variable, the fallback PIN is <code>2026</code>. Keep this PIN private.</p>
+      <h2>Admin sign-in</h2>
+      <p>Use your private admin passphrase. The server verifies its PBKDF2-SHA256 hash from Render’s <code>TOURNAMENT_ADMIN_PASSWORD_HASH</code> environment variable. There is no default password and no offline admin mode.</p>
       <div class="filters">
-        <label>Admin PIN<input id="admin-pin" type="password" inputmode="numeric" placeholder="Enter PIN" /></label>
-        <button class="btn" id="admin-unlock" type="button">Unlock</button>
+        <label>Admin password<input id="admin-password" type="password" autocomplete="current-password" minlength="16" maxlength="1024" placeholder="Enter your passphrase" /></label>
+        <button class="btn" id="admin-unlock" type="button">Sign in</button>
       </div>
     </div>
   </section>
 
   <section class="section hidden" id="admin-panel">
+    <div class="admin-actions"><button class="btn small ghost" id="admin-logout" type="button">Sign out</button></div>
     <div class="stats-grid" id="admin-live-summary"></div>
     <p class="storage-status" id="admin-storage-status" role="status">Storage status will appear after the admin summary loads.</p>
     <div class="admin-grid">
@@ -168,7 +169,7 @@
 
       <article class="admin-box full">
         <h2>Export / import admin state</h2>
-        <p>Use this to move your local slot counts and leaderboard data between devices. To make all public visitors see it on GitHub Pages, paste this state into <code>publishedState</code> inside <code>data.js</code> and commit.</p>
+        <p>This moves selected browser-local counts and leaderboard/history settings between devices. It is <b>not a full backup</b>: registrations and payment settings are excluded. Never use this file to recover server data, include room passwords, paste it into <code>data.js</code>, or commit it; exported history may contain player names.</p>
         <textarea id="state-json-box" placeholder="Exported/imported JSON appears here"></textarea>
         <div class="admin-actions">
           <button class="btn small" id="export-state" type="button">Export State JSON</button>
