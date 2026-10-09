@@ -1,5 +1,7 @@
-# This Blueprint intentionally stays on Render Free and does not add paid storage.
-# Free local files are ephemeral; durable state still requires an external store or a paid disk.
+# This Blueprint intentionally stays on the Free plan and does not add a paid disk.
+# Free local files are ephemeral. For durable JSON state, explicitly upgrade the
+# existing service, attach a persistent disk at /var/data, and set
+# TOURNAMENT_DATA_DIR=/var/data in the service's environment settings.
 services:
   - type: web
     name: nith-free-fire-tournament
@@ -8,5 +10,5 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python server.py
     envVars:
-      - key: TOURNAMENT_ADMIN_PASSWORD_HASH
+      - key: TOURNAMENT_ADMIN_PIN
         sync: false

@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
-import base64
-import hashlib
-import hmac
-import ipaddress
 import json
 import os
 import re
-import secrets
 import shutil
+import hashlib
 import threading
-import time
-import unicodedata
-from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
-from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
@@ -21,30 +13,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("TOURNAMENT_DATA_DIR", "").strip() or ROOT
 DATA_FILE = os.environ.get("TOURNAMENT_DATA_FILE", "").strip() or os.path.join(DATA_DIR, "server-data.json")
 STATE_LOCK = threading.RLock()
-ADMIN_PASSWORD_HASH = os.environ.get("TOURNAMENT_ADMIN_PASSWORD_HASH", "").strip()
-PBKDF2_ITERATIONS = 600_000
-SESSION_TTL_SECONDS = 8 * 60 * 60
-SESSION_COOKIE_SECURE_NAME = "__Host-nith_admin"
-SESSION_COOKIE_DEV_NAME = "nith_admin_dev"
-ADMIN_SESSIONS = {}
-ADMIN_SESSIONS_LOCK = threading.RLock()
-RATE_LIMITS = {
-    "admin-login": (5, 15 * 60),
-    "admin-login-global": (30, 15 * 60),
-    "admin-api": (120, 60),
-    "register": (30, 10 * 60),
-    "check-status": (120, 5 * 60),
-    "public-state": (180, 60),
-    "admin-session": (60, 60),
-    "other-api": (120, 60),
-}
-_RATE_BUCKETS = defaultdict(deque)
-_RATE_LOCK = threading.Lock()
-PUBLIC_STATIC_FILES = frozenset({
-    "index.html", "admin.html", "admin-dashboard.html", "battle-royale.html",
-    "clash-squad.html", "leaderboard.html", "room-details.html", "rules.html",
-    "schedule-results.html", "status-check.html", "data.js", "site.js", "styles.css",
-})
+ADMIN_PIN = (os.environ.get("TOURNAMENT_ADMIN_PIN") or "2026").strip()
 DEFAULT_SCHEDULE_SETTINGS = {
     "br": {"startTime": "21:00", "durationHours": 1, "gapHours": 0},
     "cs": {"startTime": "21:00", "durationHours": 1, "gapHours": 0},
@@ -52,57 +21,6 @@ DEFAULT_SCHEDULE_SETTINGS = {
 BR_PLACEMENT_POINTS = {1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1, 11: 0, 12: 0}
 IMAGE_DATA_URL_RE = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")
 MAX_QR_DATA_URL_CHARS = 1_500_000
-
-
-def create_password_hash(password, salt=None, iterations=PBKDF2_ITERATIONS):
-    """Create a PBKDF2-SHA256 verifier for a strong admin passphrase."""
-    if not isinstance(password, str) or len(password) < 16:
-        raise ValueError("Admin password must be at least 16 characters long.")
-    if not isinstance(iterations, int) or iterations < PBKDF2_ITERATIONS:
-        raise ValueError("PBKDF2 iteration count is below the configured security minimum.")
-    salt_bytes = salt if isinstance(salt, bytes) else secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, iterations)
-    salt_text = base64.urlsafe_b64encode(salt_bytes).decode("ascii").rstrip("=")
-    digest_text = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
-    return f"pbkdf2_sha256${iterations}${salt_text}${digest_text}"
-
-
-def verify_password_hash(password, encoded_hash):
-    if not isinstance(password, str) or not isinstance(encoded_hash, str):
-        return False
-    try:
-        algorithm, rounds_text, salt_text, digest_text = encoded_hash.split("$", 3)
-        rounds = int(rounds_text)
-        if algorithm != "pbkdf2_sha256" or not PBKDF2_ITERATIONS <= rounds <= 2_000_000:
-            return False
-        padding = "=" * (-len(salt_text) % 4)
-        salt = base64.urlsafe_b64decode(salt_text + padding)
-        padding = "=" * (-len(digest_text) % 4)
-        expected = base64.urlsafe_b64decode(digest_text + padding)
-        if len(salt) < 16 or len(salt) > 64 or len(expected) != 32:
-            return False
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, rounds)
-        return hmac.compare_digest(actual, expected)
-    except (ValueError, TypeError, UnicodeError, base64.binascii.Error):
-        return False
-
-
-def allow_rate_limit(key, limit, window_seconds, now=None):
-    now = time.monotonic() if now is None else now
-    with _RATE_LOCK:
-        bucket = _RATE_BUCKETS[key]
-        cutoff = now - window_seconds
-        while bucket and bucket[0] <= cutoff:
-            bucket.popleft()
-        if len(bucket) >= limit:
-            return False
-        bucket.append(now)
-        if len(_RATE_BUCKETS) > 20_000:
-            for stale_key in list(_RATE_BUCKETS)[:5_000]:
-                stale_bucket = _RATE_BUCKETS[stale_key]
-                if not stale_bucket or stale_bucket[-1] <= now - 3600:
-                    _RATE_BUCKETS.pop(stale_key, None)
-        return True
 
 
 def now_iso():
@@ -288,12 +206,10 @@ def _load_state_locked():
             row["formatLabel"] = CS_FORMAT_LABELS[cs_format]
             changed = True
     known_history = {(str(row.get("registrationId") or ""), row.get("date")) for row in base["matchHistory"]}
-    registrations_with_history = {registration_id for registration_id, _ in known_history if registration_id}
     for reg in base["registrations"]:
         registration_id = str(reg.get("id") or "")
         match_date = match_date_from_timestamp(reg.get("scoreUpdatedAt"))
-        # Legacy latest scores should be migrated only when this registration has no dated history.
-        if not registration_id or not match_date or registration_id in registrations_with_history or (registration_id, match_date) in known_history or reg.get("finalScore") is None:
+        if not registration_id or not match_date or (registration_id, match_date) in known_history or reg.get("finalScore") is None:
             continue
         mode = room_mode(reg.get("roomId"), reg.get("mode"))
         result_details = public_match_results(reg)
@@ -375,27 +291,22 @@ def save_state(state):
     with STATE_LOCK:
         state["updatedAt"] = now_iso()
         directory = os.path.dirname(os.path.abspath(DATA_FILE))
-        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.makedirs(directory, exist_ok=True)
         if os.path.exists(DATA_FILE):
             try:
                 with open(DATA_FILE, "r", encoding="utf-8") as current:
                     json.load(current)
                 backup_tmp = DATA_FILE + ".bak.tmp"
                 shutil.copy2(DATA_FILE, backup_tmp)
-                os.chmod(backup_tmp, 0o600)
                 os.replace(backup_tmp, DATA_FILE + ".bak")
-                os.chmod(DATA_FILE + ".bak", 0o600)
             except Exception:
                 pass
         tmp = DATA_FILE + ".tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
-        os.chmod(tmp, 0o600)
         os.replace(tmp, DATA_FILE)
-        os.chmod(DATA_FILE, 0o600)
 
 
 def is_approved(reg):
@@ -435,42 +346,6 @@ def cs_format_from_room_id(room_id):
 
 def room_capacity(room_id):
     return 2 if str(room_id or "").upper().startswith("CS-") else 12
-
-
-def room_metadata(room_id):
-    room_id = str(room_id or "").strip().upper()
-    br_match = re.fullmatch(r"BR-(SOLO|DUO|TRIO|SQUAD)-(20|40|60|80|100)-([1-3])", room_id)
-    if br_match:
-        format_id, fee_text, slot_text = br_match.groups()
-        labels = {"SOLO": "Solo", "DUO": "Duo", "TRIO": "Trio", "SQUAD": "Squad"}
-        players = {"SOLO": 1, "DUO": 2, "TRIO": 3, "SQUAD": 4}
-        label = labels[format_id]
-        slot = int(slot_text)
-        return {
-            "id": room_id, "mode": "br", "modeLabel": "Battle Royale",
-            "format": format_id.lower(), "formatLabel": label,
-            "playersPerEntry": players[format_id], "fee": int(fee_text),
-            "feeRule": "per player" if format_id == "SOLO" else "per team",
-            "variant": "", "slot": slot, "capacity": 12,
-            "title": f"{label} Battle Royale Lobby {slot}",
-        }
-    cs_match = re.fullmatch(r"CS-(NM|OT)(?:-(SOLO|DUO|TRIO))?-(50|70|90|110)-([1-3])", room_id)
-    if cs_match:
-        variant_code, format_code, fee_text, slot_text = cs_match.groups()
-        format_id = format_code or "SQUAD"
-        labels = {"SOLO": "Solo · 1v1", "DUO": "Duo · 2v2", "TRIO": "Trio · 3v3", "SQUAD": "Squad · 4v4"}
-        players = {"SOLO": 1, "DUO": 2, "TRIO": 3, "SQUAD": 4}
-        variant = "One Tap" if variant_code == "OT" else "Normal"
-        slot = int(slot_text)
-        return {
-            "id": room_id, "mode": "cs", "modeLabel": "Clash Squad",
-            "format": format_id.lower(), "formatLabel": labels[format_id],
-            "playersPerEntry": players[format_id], "fee": int(fee_text),
-            "feeRule": "per registered side", "variant": variant,
-            "slot": slot, "capacity": 2,
-            "title": f"{variant} {labels[format_id]} Clash Squad Room {slot}",
-        }
-    return None
 
 
 def used_slots(registrations, room_id, exclude_id=None):
@@ -676,31 +551,8 @@ def admin_summary(state):
     }
 
 
-def normalize_user_text(value, limit=500, preserve_lines=False):
-    if not isinstance(value, str):
-        return ""
-    filtered = []
-    for char in value:
-        if char in "\r\n":
-            filtered.append("\n" if preserve_lines else " ")
-        elif char == "\t":
-            filtered.append(" ")
-        elif unicodedata.category(char) == "Cc":
-            continue
-        else:
-            # Preserve Unicode format/combining characters used in emoji and player names.
-            filtered.append(char)
-    printable = "".join(filtered)
-    if preserve_lines:
-        cleaned = "\n".join(" ".join(line.split()) for line in printable.splitlines()).strip()
-    else:
-        cleaned = " ".join(printable.split())
-    return cleaned[:limit]
-
-
-
 def normalize_name(value, limit=80):
-    return normalize_user_text(value, limit)
+    return " ".join(str(value or "").split())[:limit]
 
 
 def score_match_result(kills, position):
@@ -767,410 +619,142 @@ def public_match_history(state):
 
 
 class Handler(SimpleHTTPRequestHandler):
-    server_version = "TournamentWeb"
-    sys_version = ""
-    protocol_version = "HTTP/1.1"
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
 
-    def setup(self):
-        # Bound slow/incomplete client requests so each cannot hold a worker forever.
-        self.request.settimeout(15)
-        super().setup()
-
     def log_message(self, fmt, *args):
-        # Keep ordinary access logging, but never log request bodies or credentials.
         print("[%s] %s" % (self.log_date_time_string(), fmt % args))
-
-    def is_secure_request(self):
-        forwarded = str(self.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
-        return forwarded == "https" or bool(getattr(self.connection, "is_https", False))
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
-        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
-        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-        csp = (
-            "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-            "form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-src 'none'"
-        )
-        if self.is_secure_request():
-            csp += "; upgrade-insecure-requests"
-            self.send_header("Strict-Transport-Security", "max-age=31536000")
-        self.send_header("Content-Security-Policy", csp)
         super().end_headers()
 
-    def send_json(self, payload, status=200, headers=None):
+    def send_json(self, payload, status=200):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
-        for name, value in (headers or []):
-            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
-    def is_same_origin(self):
-        origin = str(self.headers.get("Origin") or "").strip()
-        host = str(self.headers.get("Host") or "").strip()
-        forwarded = str(self.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
-        scheme = forwarded if forwarded in ("http", "https") else ("https" if self.is_secure_request() else "http")
-        try:
-            parsed = urlparse(origin)
-            return (
-                parsed.scheme.lower() == scheme
-                and parsed.netloc.casefold() == host.casefold()
-                and parsed.path in ("", "/")
-                and not parsed.params
-                and not parsed.query
-                and not parsed.fragment
-                and parsed.username is None
-                and parsed.password is None
-            )
-        except Exception:
-            return False
+    def read_json(self):
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length <= 0:
+            return {}
+        if length > 4_000_000:
+            raise ValueError("Request is too large")
+        raw = self.rfile.read(length)
+        return json.loads(raw.decode("utf-8") or "{}")
 
-    def client_ip(self):
-        # Render's proxy appends the connecting client address at the end of X-Forwarded-For.
-        forwarded = str(self.headers.get("X-Forwarded-For") or "")
-        if forwarded:
-            candidate = forwarded.split(",")[-1].strip()
-            try:
-                return str(ipaddress.ip_address(candidate))
-            except ValueError:
-                pass
-        try:
-            return str(ipaddress.ip_address(self.client_address[0]))
-        except (ValueError, TypeError, IndexError):
-            return "unknown"
-
-    def rate_limit_bucket(self, path):
-        ip = self.client_ip()
-        if path == "/api/admin/login":
-            per_ip_limit, per_ip_window = RATE_LIMITS["admin-login"]
-            global_limit, global_window = RATE_LIMITS["admin-login-global"]
-            return (
-                allow_rate_limit(("admin-login", ip), per_ip_limit, per_ip_window)
-                and allow_rate_limit(("admin-login-global",), global_limit, global_window)
-            )
-        if path == "/api/admin/session":
-            name = "admin-session"
-        elif path == "/api/register":
-            name = "register"
-        elif path == "/api/check-status":
-            name = "check-status"
-        elif path == "/api/state":
-            name = "public-state"
-        elif path.startswith("/api/admin/"):
-            name = "admin-api"
-        else:
-            name = "other-api"
-        limit, window = RATE_LIMITS[name]
-        return allow_rate_limit((name, ip), limit, window)
-
-    def cookie_name(self):
-        return SESSION_COOKIE_SECURE_NAME if self.is_secure_request() else SESSION_COOKIE_DEV_NAME
-
-    def make_session_cookie(self, name, value, max_age):
-        cookie = SimpleCookie()
-        cookie[name] = value
-        morsel = cookie[name]
-        morsel["path"] = "/"
-        morsel["max-age"] = str(int(max_age))
-        morsel["httponly"] = True
-        morsel["samesite"] = "Strict"
-        if name == SESSION_COOKIE_SECURE_NAME or self.is_secure_request():
-            morsel["secure"] = True
-        return morsel.OutputString()
-
-    def clear_session_cookies(self):
-        return [
-            ("Set-Cookie", self.make_session_cookie(SESSION_COOKIE_SECURE_NAME, "", 0)),
-            ("Set-Cookie", self.make_session_cookie(SESSION_COOKIE_DEV_NAME, "", 0)),
-        ]
-
-    def raw_session_token(self):
-        cookie_header = str(self.headers.get("Cookie") or "")
-        if not cookie_header:
-            return ""
-        jar = SimpleCookie()
-        try:
-            jar.load(cookie_header)
-        except Exception:
-            return ""
-        for name in (self.cookie_name(), SESSION_COOKIE_SECURE_NAME, SESSION_COOKIE_DEV_NAME):
-            if name in jar:
-                return str(jar[name].value or "")
-        return ""
-
-    def get_admin_session(self):
-        token = self.raw_session_token()
-        if not token:
-            return None, None
-        key = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        now = time.monotonic()
-        with ADMIN_SESSIONS_LOCK:
-            session = ADMIN_SESSIONS.get(key)
-            if not session:
-                return None, None
-            if session["expires"] <= now:
-                ADMIN_SESSIONS.pop(key, None)
-                return None, None
-            return key, session
-
-    def start_admin_session(self):
-        token = secrets.token_urlsafe(32)
-        csrf_token = secrets.token_urlsafe(32)
-        key = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        now = time.monotonic()
-        with ADMIN_SESSIONS_LOCK:
-            for expired_key in [k for k, value in ADMIN_SESSIONS.items() if value["expires"] <= now]:
-                ADMIN_SESSIONS.pop(expired_key, None)
-            while len(ADMIN_SESSIONS) >= 2_000:
-                ADMIN_SESSIONS.pop(next(iter(ADMIN_SESSIONS)))
-            ADMIN_SESSIONS[key] = {"csrf": csrf_token, "expires": now + SESSION_TTL_SECONDS}
-        cookie_name = self.cookie_name()
-        headers = [("Set-Cookie", self.make_session_cookie(cookie_name, token, SESSION_TTL_SECONDS))]
-        self.send_json({"ok": True, "csrfToken": csrf_token, "expiresIn": SESSION_TTL_SECONDS}, headers=headers)
-
-    def require_admin(self):
-        _key, session = self.get_admin_session()
-        if not session:
-            self.send_json({"ok": False, "error": "Admin sign-in required."}, 401)
-            return False
-        csrf = str(self.headers.get("X-CSRF-Token") or "")
-        if not csrf or not hmac.compare_digest(csrf, session["csrf"]):
-            self.send_json({"ok": False, "error": "Security token expired. Sign in again."}, 403)
+    def require_pin(self, payload):
+        if str(payload.get("pin") or "") != str(ADMIN_PIN):
+            self.send_json({"ok": False, "error": "Invalid admin PIN"}, 403)
             return False
         return True
 
-    def read_json(self):
-        content_type = str(self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
-        if content_type != "application/json":
-            raise ValueError("Content-Type must be application/json")
-        raw_length = self.headers.get("Content-Length", "0")
-        try:
-            length = int(raw_length or "0")
-        except (TypeError, ValueError):
-            raise ValueError("Invalid Content-Length")
-        if length <= 0:
-            return {}
-        if length > 2_000_000:
-            raise ValueError("Request is too large")
-        raw = self.rfile.read(length)
-        parsed = json.loads(raw.decode("utf-8") or "{}")
-        if not isinstance(parsed, dict):
-            raise ValueError("JSON body must be an object")
-        return parsed
-
-    def is_public_static_path(self, path):
-        decoded = unquote(str(path or ""))
-        if decoded == "/":
-            decoded = "/index.html"
-        if not decoded.startswith("/") or decoded.startswith("//") or "\\" in decoded:
-            return False
-        relative = decoded.lstrip("/")
-        if not relative or "/" in relative or relative not in PUBLIC_STATIC_FILES:
-            return False
-        root = os.path.realpath(ROOT)
-        candidate = os.path.realpath(os.path.join(root, relative))
-        try:
-            return os.path.commonpath((root, candidate)) == root and os.path.isfile(candidate)
-        except (OSError, ValueError):
-            return False
+    def is_private_static_path(self, path):
+        decoded = unquote(str(path or "")).lstrip("/")
+        candidate = os.path.realpath(os.path.join(ROOT, decoded))
+        protected_state_paths = {
+            os.path.realpath(DATA_FILE),
+            os.path.realpath(os.path.join(ROOT, "server-data.json")),
+        }
+        state_file = False
+        for state_path in protected_state_paths:
+            same_directory = os.path.dirname(candidate) == os.path.dirname(state_path)
+            state_name = os.path.basename(state_path)
+            if candidate == state_path or (same_directory and os.path.basename(candidate).startswith(state_name + ".")):
+                state_file = True
+                break
+        server_source = os.path.realpath(os.path.join(ROOT, "server.py"))
+        return candidate == server_source or state_file
 
     def do_HEAD(self):
         path = urlparse(self.path).path
-        if not self.is_public_static_path(path):
+        if self.is_private_static_path(path):
             self.send_error(404, "Not found")
             return
-        if path == "/":
-            self.path = "/index.html"
         super().do_HEAD()
 
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/api/state":
-            if not self.rate_limit_bucket(path):
-                self.send_json({"ok": False, "error": "Too many requests. Please try again shortly."}, 429, [("Retry-After", "60")])
-                return
             self.send_json(public_state(load_state()))
             return
-        if path == "/api/admin/session":
-            if not self.rate_limit_bucket(path):
-                self.send_json({"ok": False, "error": "Too many requests. Please try again shortly."}, 429, [("Retry-After", "60")])
-                return
-            _key, session = self.get_admin_session()
-            if not session:
-                self.send_json({"ok": False, "error": "Admin sign-in required."}, 401)
-                return
-            self.send_json({"ok": True, "csrfToken": session["csrf"], "expiresIn": max(0, int(session["expires"] - time.monotonic()))})
-            return
-        if path.startswith("/api/"):
+        if self.is_private_static_path(path):
             self.send_json({"ok": False, "error": "Not found"}, 404)
             return
-        if not self.is_public_static_path(path):
-            self.send_error(404, "Not found")
-            return
-        if path == "/":
-            self.path = "/index.html"
         super().do_GET()
 
-    def do_OPTIONS(self):
-        self.send_response(405)
-        self.send_header("Allow", "GET, HEAD, POST")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
     def do_POST(self):
-        path = urlparse(self.path).path
-        if path in ("/api/admin/login", "/api/admin/logout"):
-            return self._do_post_locked()
         with STATE_LOCK:
             return self._do_post_locked()
 
     def _do_post_locked(self):
         path = urlparse(self.path).path
-        if not path.startswith("/api/"):
-            self.send_json({"ok": False, "error": "Not found"}, 404)
-            return
-        if not self.is_same_origin():
-            self.send_json({"ok": False, "error": "Cross-origin requests are not allowed."}, 403)
-            return
-        if not self.rate_limit_bucket(path):
-            self.send_json({"ok": False, "error": "Too many requests. Please try again shortly."}, 429, [("Retry-After", "60")])
-            return
         try:
             payload = self.read_json()
         except Exception:
-            self.send_json({"ok": False, "error": "Invalid JSON, content type, or oversized request."}, 400)
-            return
-
-        if path == "/api/admin/login":
-            if not ADMIN_PASSWORD_HASH:
-                self.send_json({"ok": False, "error": "Admin sign-in is not configured. Set TOURNAMENT_ADMIN_PASSWORD_HASH in the host environment."}, 503)
-                return
-            password = payload.get("password")
-            if not isinstance(password, str) or len(password) > 1024 or not verify_password_hash(password, ADMIN_PASSWORD_HASH):
-                self.send_json({"ok": False, "error": "Sign-in failed."}, 401)
-                return
-            self.start_admin_session()
-            return
-
-        if path == "/api/admin/logout":
-            if not self.require_admin():
-                return
-            token = self.raw_session_token()
-            if token:
-                key = hashlib.sha256(token.encode("utf-8")).hexdigest()
-                with ADMIN_SESSIONS_LOCK:
-                    ADMIN_SESSIONS.pop(key, None)
-            self.send_json({"ok": True, "message": "Signed out."}, headers=self.clear_session_cookies())
-            return
-
-        if path.startswith("/api/admin/") and not self.require_admin():
+            self.send_json({"ok": False, "error": "Invalid JSON or oversized request"}, 400)
             return
         state = load_state()
+
         if path == "/api/register":
-            room_id = str(payload.get("roomId") or "").strip().upper()
-            room = room_metadata(room_id)
-            if not room:
-                self.send_json({"ok": False, "error": "Choose a valid tournament room."}, 400)
+            reg = dict(payload or {})
+            if not reg.get("id") or not reg.get("roomId") or not reg.get("teamName"):
+                self.send_json({"ok": False, "error": "Missing registration details"}, 400)
                 return
-            registration_id = str(payload.get("id") or "").strip()
-            if not re.fullmatch(r"(?:BR|CS)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+){0,3}", registration_id):
-                self.send_json({"ok": False, "error": "Registration ID is invalid. Refresh the form and try again."}, 400)
-                return
-            if any(str(existing.get("id")) == registration_id for existing in state.get("registrations", [])):
+            if any(str(existing.get("id")) == str(reg.get("id")) for existing in state.get("registrations", [])):
                 self.send_json({"ok": False, "error": "This registration was already submitted."}, 409)
                 return
-            if payload.get("acceptedRules") is not True:
-                self.send_json({"ok": False, "error": "Accept the tournament rules before submitting."}, 400)
-                return
-            players = payload.get("players")
-            if not isinstance(players, list) or len(players) != room["playersPerEntry"]:
-                self.send_json({"ok": False, "error": f"This room requires exactly {room['playersPerEntry']} player{'s' if room['playersPerEntry'] != 1 else ''}."}, 400)
-                return
-            normalized_players = []
-            for index, player in enumerate(players, start=1):
-                if not isinstance(player, dict):
-                    self.send_json({"ok": False, "error": f"Enter valid player details for Player {index}."}, 400)
+            mode = room_mode(reg.get("roomId"), reg.get("mode"))
+            if mode == "cs":
+                cs_format = cs_format_from_room_id(reg.get("roomId"))
+                required_players = CS_FORMAT_PLAYERS[cs_format]
+                players = reg.get("players") if isinstance(reg.get("players"), list) else []
+                try:
+                    submitted_player_count = int(reg.get("playersPerEntry") or len(players))
+                except (TypeError, ValueError):
+                    submitted_player_count = 0
+                if submitted_player_count != required_players or len(players) != required_players:
+                    self.send_json({"ok": False, "error": f"This {CS_FORMAT_LABELS[cs_format]} Clash Squad room requires exactly {required_players} player{'s' if required_players != 1 else ''} per side."}, 400)
                     return
-                ign = normalize_name(player.get("ign"), 80)
-                uid = str(player.get("uid") or "").strip() if isinstance(player.get("uid"), (str, int)) else ""
-                if not ign or not re.fullmatch(r"\d{6,15}", uid):
-                    self.send_json({"ok": False, "error": f"Enter a valid IGN and numeric Free Fire ID for Player {index}."}, 400)
-                    return
-                normalized_players.append({"ign": ign, "uid": uid})
-            try:
-                submitted_player_count = int(payload.get("playersPerEntry") or 0)
-            except (TypeError, ValueError):
-                submitted_player_count = 0
-            if submitted_player_count != room["playersPerEntry"]:
-                self.send_json({"ok": False, "error": "Player count does not match the selected room."}, 400)
-                return
-            team_name = normalize_name(payload.get("teamName"), 80) or normalized_players[0]["ign"]
-            whatsapp = normalize_user_text(payload.get("whatsapp"), 24)
-            whatsapp_digits = re.sub(r"\D", "", whatsapp)
-            if not re.fullmatch(r"[+0-9() .-]{10,24}", whatsapp) or not 10 <= len(whatsapp_digits) <= 13:
-                self.send_json({"ok": False, "error": "Enter a valid WhatsApp number."}, 400)
-                return
-            payment_ref = normalize_user_text(payload.get("paymentRef"), 120)
-            if not payment_ref:
-                self.send_json({"ok": False, "error": "Enter the payment reference or write 'Pay after confirmation'."}, 400)
-                return
-            schedule_key = f"slot{room['slot']}"
-            window = next((item for item in schedule_windows(state.get("scheduleSettings"))[room["mode"]] if item["id"] == schedule_key), None)
+                normalized_players = []
+                for index, player in enumerate(players, start=1):
+                    if not isinstance(player, dict):
+                        self.send_json({"ok": False, "error": f"Enter valid player details for Player {index}."}, 400)
+                        return
+                    ign = normalize_name(player.get("ign"), 80)
+                    uid = str(player.get("uid") or "").strip()
+                    if not ign or not re.fullmatch(r"\d{6,15}", uid):
+                        self.send_json({"ok": False, "error": f"Enter a valid IGN and numeric Free Fire ID for Player {index}."}, 400)
+                        return
+                    normalized_players.append({"ign": ign, "uid": uid})
+                reg["players"] = normalized_players
+                reg["playersPerEntry"] = required_players
+                reg["format"] = cs_format.lower()
+                reg["formatLabel"] = CS_FORMAT_LABELS[cs_format]
+                reg["feeRule"] = "per registered side"
+            schedule_key = f"slot{room_slot_index(reg.get('roomId'))}"
+            window = next((item for item in schedule_windows(state.get("scheduleSettings"))[mode] if item["id"] == schedule_key), None)
             if not window:
                 self.send_json({"ok": False, "error": "Could not determine match time from the selected lobby."}, 400)
                 return
-            slot, capacity = next_available_slot(state.get("registrations", []), room_id)
+            reg["mode"] = mode
+            reg["scheduleSlot"] = schedule_key
+            reg["scheduleSlotLabel"] = window["label"]
+            reg["scheduleTime"] = window["time"] + " IST"
+            slot, capacity = next_available_slot(state.get("registrations", []), reg.get("roomId"))
             if slot is None:
                 self.send_json({"ok": False, "error": f"This lobby has no slots left (maximum {capacity}). Choose another time slot/lobby."}, 409)
                 return
-            server_stamp = now_iso()
-            ist = timezone(timedelta(hours=5, minutes=30))
-            submitted_at_display = datetime.now(timezone.utc).astimezone(ist).strftime("%d %b %Y, %I:%M %p")
-            reg = {
-                "id": registration_id,
-                "mode": room["mode"],
-                "modeLabel": room["modeLabel"],
-                "format": room["format"],
-                "formatLabel": room["formatLabel"],
-                "playersPerEntry": room["playersPerEntry"],
-                "roomId": room_id,
-                "roomTitle": room["title"],
-                "scheduleSlot": schedule_key,
-                "scheduleSlotLabel": window["label"],
-                "scheduleTime": window["time"] + " IST",
-                "fee": room["fee"],
-                "feeRule": room["feeRule"],
-                "variant": room["variant"],
-                "teamName": team_name,
-                "captainName": normalized_players[0]["ign"],
-                "iglName": normalized_players[0]["ign"],
-                "iglUid": normalized_players[0]["uid"],
-                "whatsapp": whatsapp,
-                "paymentRef": payment_ref,
-                "players": normalized_players,
-                "acceptedRules": True,
-                "localSlotHeld": True,
-                "status": "Pending",
-                "submittedAt": server_stamp,
-                "submittedAtDisplay": submitted_at_display,
-            }
             reg["slotNumber"] = slot
             reg["slotCapacity"] = capacity
-            reg["serverReceivedAt"] = server_stamp
+            reg["serverReceivedAt"] = now_iso()
+            reg["status"] = "Pending"
             state.setdefault("registrations", []).insert(0, reg)
             save_state(state)
             self.send_json({
@@ -1182,18 +766,14 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/check-status":
-            room_id = str(payload.get("roomId") or "").strip().upper()
-            room = room_metadata(room_id)
+            room_id = str(payload.get("roomId") or "").strip()
             try:
                 slot_number = int(payload.get("slotNumber") or 0)
             except (TypeError, ValueError):
                 slot_number = 0
-            if not room:
-                self.send_json({"ok": False, "error": "Choose a valid lobby."}, 400)
-                return
-            capacity = room["capacity"]
-            if not 1 <= slot_number <= capacity:
-                self.send_json({"ok": False, "error": f"Enter a slot number from 1 to {capacity}."}, 400)
+            capacity = room_capacity(room_id)
+            if not room_id or not 1 <= slot_number <= capacity:
+                self.send_json({"ok": False, "error": f"Choose a lobby and enter a slot number from 1 to {capacity}."}, 400)
                 return
             found_reg = None
             for reg in state.get("registrations", []):
@@ -1208,10 +788,14 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/summary":
+            if not self.require_pin(payload):
+                return
             self.send_json({"ok": True, **admin_summary(state)})
             return
 
         if path == "/api/admin/registration-status":
+            if not self.require_pin(payload):
+                return
             reg_id = str(payload.get("registrationId") or "").strip()
             status = str(payload.get("status") or "").strip().title()
             if status not in ("Pending", "Approved", "Rejected"):
@@ -1248,6 +832,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/edit-registration":
+            if not self.require_pin(payload):
+                return
             reg_id = str(payload.get("registrationId") or "").strip()
             reg = next((item for item in state.get("registrations", []) if str(item.get("id")) == reg_id), None)
             if not reg:
@@ -1292,6 +878,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/delete-registration":
+            if not self.require_pin(payload):
+                return
             reg_id = str(payload.get("registrationId") or "").strip()
             before = len(state.get("registrations", []))
             state["registrations"] = [item for item in state.get("registrations", []) if str(item.get("id")) != reg_id]
@@ -1303,19 +891,22 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/clear-registrations":
+            if not self.require_pin(payload):
+                return
             state["registrations"] = []
             save_state(state)
             self.send_json({"ok": True, "state": public_state(state)})
             return
 
         if path == "/api/admin/room-count":
-            room_id = str(payload.get("roomId") or "").strip().upper()
-            room = room_metadata(room_id)
+            if not self.require_pin(payload):
+                return
+            room_id = str(payload.get("roomId") or "").strip()
             try:
                 count = int(payload.get("count") or 0)
             except (TypeError, ValueError):
                 count = -1
-            if not room or count < 0 or count > room["capacity"]:
+            if not room_id or count < 0 or count > room_capacity(room_id):
                 self.send_json({"ok": False, "error": "Enter a valid room and count within its capacity."}, 400)
                 return
             state.setdefault("roomOverrides", {})[room_id] = count
@@ -1324,6 +915,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/schedule-settings":
+            if not self.require_pin(payload):
+                return
             proposed = payload.get("settings")
             if not isinstance(proposed, dict):
                 self.send_json({"ok": False, "error": "Schedule settings are required."}, 400)
@@ -1358,6 +951,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/payment-settings":
+            if not self.require_pin(payload):
+                return
             settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
             qr = settings.get("qrDataUrl", "")
             if not valid_image_data_url(qr):
@@ -1365,8 +960,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             state["paymentSettings"] = {
                 "payeeName": normalize_name(settings.get("payeeName"), 100),
-                "upiId": normalize_user_text(settings.get("upiId"), 120),
-                "note": normalize_user_text(settings.get("note"), 500, preserve_lines=True),
+                "upiId": str(settings.get("upiId") or "").strip()[:120],
+                "note": str(settings.get("note") or "").strip()[:500],
                 "qrDataUrl": qr or "",
                 "updatedAt": now_iso(),
             }
@@ -1375,6 +970,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/leaderboard-settings":
+            if not self.require_pin(payload):
+                return
             settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
             default_view = str(settings.get("defaultView") or "").strip().lower()
             if default_view not in ("latest", "all"):
@@ -1386,6 +983,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/match-results":
+            if not self.require_pin(payload):
+                return
             match_date = str(payload.get("matchDate") or date.today().isoformat()).strip()
             if not valid_match_date(match_date):
                 self.send_json({"ok": False, "error": "Choose a valid match date in YYYY-MM-DD format."}, 400)
@@ -1516,41 +1115,31 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/room-details":
-            source = payload.get("detail")
-            detail = source if isinstance(source, dict) else {}
-            room_id = str(detail.get("roomId") or "").strip().upper()
-            if not room_metadata(room_id):
-                self.send_json({"ok": False, "error": "Choose a valid website room."}, 400)
+            if not self.require_pin(payload):
+                return
+            detail = payload.get("detail") or {}
+            room_id = str(detail.get("roomId") or "").strip()
+            if not room_id:
+                self.send_json({"ok": False, "error": "Missing website room"}, 400)
                 return
             qr = detail.get("roomQrDataUrl", "")
             if not valid_image_data_url(qr):
                 self.send_json({"ok": False, "error": "Room join QR must be a PNG, JPG, or WebP image up to about 1 MB."}, 400)
                 return
-            custom_room_id = normalize_user_text(detail.get("customRoomId"), 40)
-            room_password = normalize_user_text(detail.get("password"), 80)
-            if not custom_room_id or not room_password:
-                self.send_json({"ok": False, "error": "Enter both the custom room ID and password."}, 400)
-                return
-            safe_detail = {
-                "roomId": room_id,
-                "customRoomId": custom_room_id,
-                "password": room_password,
-                "message": normalize_user_text(detail.get("message"), 500, preserve_lines=True),
-                "roomQrDataUrl": qr or "",
-                "published": detail.get("published") is True,
-                "forcePublish": detail.get("forcePublish") is True,
-                "updatedAt": now_iso(),
-            }
-            state.setdefault("roomDetails", {})[room_id] = safe_detail
+            detail["roomQrDataUrl"] = qr or ""
+            detail["updatedAt"] = now_iso()
+            state.setdefault("roomDetails", {})[room_id] = detail
             save_state(state)
             self.send_json({"ok": True, "state": public_state(state), **admin_summary(state)})
             return
 
         if path == "/api/admin/delete-room-details":
-            room_id = str(payload.get("roomId") or "").strip().upper()
+            if not self.require_pin(payload):
+                return
+            room_id = str(payload.get("roomId") or "").strip()
             room_details = state.setdefault("roomDetails", {})
-            if not room_metadata(room_id):
-                self.send_json({"ok": False, "error": "Select a valid website room."}, 400)
+            if not room_id:
+                self.send_json({"ok": False, "error": "Select a website room."}, 400)
                 return
             if room_id not in room_details:
                 self.send_json({"ok": False, "error": "No saved room details exist for this lobby."}, 404)
@@ -1563,42 +1152,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json({"ok": False, "error": "Unknown API endpoint"}, 404)
 
 
-class BoundedThreadingHTTPServer(ThreadingHTTPServer):
-    daemon_threads = True
-    request_queue_size = 64
-    max_concurrent_requests = 64
-
-    def __init__(self, *args, **kwargs):
-        self._request_slots = threading.BoundedSemaphore(self.max_concurrent_requests)
-        super().__init__(*args, **kwargs)
-
-    def process_request(self, request, client_address):
-        if not self._request_slots.acquire(blocking=False):
-            self.shutdown_request(request)
-            return
-        try:
-            worker = threading.Thread(
-                target=self.process_request_thread,
-                args=(request, client_address),
-                daemon=self.daemon_threads,
-            )
-            worker.start()
-        except Exception:
-            self._request_slots.release()
-            self.handle_error(request, client_address)
-            self.shutdown_request(request)
-
-    def process_request_thread(self, request, client_address):
-        try:
-            super().process_request_thread(request, client_address)
-        finally:
-            self._request_slots.release()
-
-
 if __name__ == "__main__":
     host = "0.0.0.0"
     port = int(os.environ.get("PORT", "8000"))
-    if not ADMIN_PASSWORD_HASH:
-        print("WARNING: TOURNAMENT_ADMIN_PASSWORD_HASH is not configured; admin sign-in is disabled.")
     print(f"NIT Hamirpur Free Fire Tournament server running on http://{host}:{port}; state file: {DATA_FILE}")
-    BoundedThreadingHTTPServer((host, port), Handler).serve_forever()
+    ThreadingHTTPServer((host, port), Handler).serve_forever()
