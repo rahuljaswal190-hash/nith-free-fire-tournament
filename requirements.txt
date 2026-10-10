@@ -1,2 +1,4 @@
 # No external Python packages are required.
 # The tournament website server uses only Python standard library modules.
+pymongo[srv]
+dnspython
