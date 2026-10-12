@@ -1,10 +1,29 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "outputDirectory": "public",
+  "builds": [
+    { "src": "dispatch.py", "use": "@vercel/python" },
+    { "src": "index.html", "use": "@vercel/static" },
+    { "src": "admin.html", "use": "@vercel/static" },
+    { "src": "admin-dashboard.html", "use": "@vercel/static" },
+    { "src": "battle-royale.html", "use": "@vercel/static" },
+    { "src": "clash-squad.html", "use": "@vercel/static" },
+    { "src": "leaderboard.html", "use": "@vercel/static" },
+    { "src": "room-details.html", "use": "@vercel/static" },
+    { "src": "rules.html", "use": "@vercel/static" },
+    { "src": "schedule-results.html", "use": "@vercel/static" },
+    { "src": "status-check.html", "use": "@vercel/static" },
+    { "src": "data.js", "use": "@vercel/static" },
+    { "src": "site.js", "use": "@vercel/static" },
+    { "src": "styles.css", "use": "@vercel/static" }
+  ],
   "rewrites": [
     {
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
       "source": "/api/:path*",
-      "destination": "/api/dispatch?__nith_vercel_path=/api/:path*"
+      "destination": "/dispatch.py?__nith_vercel_path=/api/:path*"
     }
   ],
   "headers": [
