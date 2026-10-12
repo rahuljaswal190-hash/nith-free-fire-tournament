@@ -23,7 +23,7 @@ except ImportError:  # MongoDB support is optional unless MONGODB_URI is configu
     MongoClient = None
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-PUBLIC_DIR = os.path.join(ROOT, "public")
+PUBLIC_DIR = os.path.join(ROOT, "public") if os.path.isdir(os.path.join(ROOT, "public")) else ROOT
 VERCEL_RUNTIME = os.environ.get("VERCEL", "").strip() == "1" or bool(os.environ.get("VERCEL_ENV", "").strip())
 DEFAULT_DATA_DIR = os.path.join("/tmp", "nith-free-fire-tournament") if VERCEL_RUNTIME else ROOT
 DATA_DIR = os.environ.get("TOURNAMENT_DATA_DIR", "").strip() or DEFAULT_DATA_DIR
