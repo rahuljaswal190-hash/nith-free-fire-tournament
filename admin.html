@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Admin tools for timings, registration edits, QR payments, room details, and verified match results." />
-  <link rel="stylesheet" href="styles.css?v=20261008-variable-cs-v1" />
+  <link rel="stylesheet" href="styles.css?v=20261012-final-update-2-3" />
 </head>
 <body data-page="admin" id="top">
+<a class="skip-link" href="#main-content">Skip to content</a>
 <header class="site-header">
   <a class="brand" href="index.html" aria-label="NIT Hamirpur Free Fire Tournament home">
     <span class="brand-mark">NITH</span>
     <span><strong data-event="shortName">NITH Free Fire Tournament</strong><small>Student-organized portal</small></span>
   </a>
-  <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
-  <nav class="main-nav" aria-label="Main navigation">
+  <button class="menu-toggle" type="button" aria-label="Open navigation" aria-controls="primary-nav" aria-expanded="false">☰</button>
+  <nav id="primary-nav" class="main-nav" aria-label="Main navigation">
     <a href="index.html" data-nav="home">Home</a>
     <a href="clash-squad.html" data-nav="clash">Clash Squad</a>
     <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
@@ -26,9 +27,9 @@
     <a href="admin.html" data-nav="admin">Admin</a>
   </nav>
 </header>
-<div class="notice-ticker"><div id="notice-strip"></div></div>
+<div class="notice-ticker" role="region" aria-label="Tournament announcements"><div id="notice-strip"></div></div>
 
-<main>
+<main id="main-content" tabindex="-1">
   <section class="hero compact">
     <div class="reveal">
       <span class="eyebrow">Admin controls</span>
@@ -38,18 +39,19 @@
     </div>
   </section>
 
-  <section class="section">
+  <section class="section" id="admin-login-box">
     <div class="admin-box">
-      <h2>Unlock admin panel</h2>
-      <p>Enter the admin PIN set in Render under <code>TOURNAMENT_ADMIN_PIN</code>. If you did not set that environment variable, the fallback PIN is <code>2026</code>. Keep this PIN private.</p>
+      <h2>Admin sign-in</h2>
+      <p>Enter the private admin PIN configured in the server environment as <code>TOURNAMENT_ADMIN_PIN</code>. There is no default PIN and no offline admin mode. Use a long, unique value; a four-digit PIN is weak for a public admin panel.</p>
       <div class="filters">
-        <label>Admin PIN<input id="admin-pin" type="password" inputmode="numeric" placeholder="Enter PIN" /></label>
-        <button class="btn" id="admin-unlock" type="button">Unlock</button>
+        <label>Admin PIN<input id="admin-pin" type="password" autocomplete="current-password" maxlength="256" placeholder="Enter your admin PIN" /></label>
+        <button class="btn" id="admin-unlock" type="button">Sign in</button>
       </div>
     </div>
   </section>
 
   <section class="section hidden" id="admin-panel">
+    <div class="admin-actions"><button class="btn small ghost" id="admin-logout" type="button">Sign out</button></div>
     <div class="stats-grid" id="admin-live-summary"></div>
     <p class="storage-status" id="admin-storage-status" role="status">Storage status will appear after the admin summary loads.</p>
     <div class="admin-grid">
@@ -85,6 +87,22 @@
           <label>Confirmed entries/teams<input id="admin-confirmed-count" type="number" min="0" value="0" /></label>
         </div>
         <div class="admin-actions"><button class="btn small" id="save-room-count" type="button">Save Slot Count</button></div>
+      </article>
+
+      <article class="admin-box full" id="lobby-fee-controls">
+        <h2>Set entry fee for each lobby</h2>
+        <p>Choose a specific BR or CS lobby and set its fee independently from <b>Free to ₹110</b> in ₹10 steps. BR Solo is charged per player; BR Duo/Trio/Squad per team; CS per registered side/team. Changes apply to new registrations only; submitted entries keep their recorded fee.</p>
+        <div class="field-grid">
+          <label>Mode<select id="lobby-fee-mode"><option value="br">Battle Royale</option><option value="cs">Clash Squad</option></select></label>
+          <label id="lobby-fee-br-format-wrap">Battle Royale Format<select id="lobby-fee-br-format"></select></label>
+          <label id="lobby-fee-cs-format-wrap" class="hidden">Clash Squad Team Size<select id="lobby-fee-cs-format"></select></label>
+          <label id="lobby-fee-variant-wrap" class="hidden">Clash Squad Type<select id="lobby-fee-variant"><option value="Normal">Normal</option><option value="One Tap">One Tap</option></select></label>
+          <label>Time Slot<select id="lobby-fee-slot"><option value="slot1">Slot 1</option><option value="slot2">Slot 2</option><option value="slot3">Slot 3</option></select></label>
+          <label>Specific lobby<select id="lobby-fee-room"></select></label>
+          <label>New entry fee<select id="lobby-fee-value"></select></label>
+        </div>
+        <div class="admin-actions"><button class="btn small" id="save-lobby-fee" type="button">Save Lobby Entry Fee</button></div>
+        <p class="disclaimer" id="lobby-fee-feedback" role="status" aria-live="polite"></p>
       </article>
 
       <article class="admin-box">
@@ -135,7 +153,9 @@
 
       <article class="admin-box full">
         <h2>Registrations & approvals</h2>
+        <p>Fetch the latest saved entries from the server. Player contact/payment details are admin-only; use each row’s Approve or Reject control after review.</p>
         <div class="admin-actions">
+          <button class="btn small" id="refresh-registrations" type="button">Refresh registrations</button>
           <button class="btn small" id="export-registrations" type="button">Export Registrations CSV</button>
           <button class="btn small ghost danger" id="clear-registrations" type="button">Clear Registrations</button>
         </div>
@@ -168,7 +188,7 @@
 
       <article class="admin-box full">
         <h2>Export / import admin state</h2>
-        <p>Use this to move your local slot counts and leaderboard data between devices. To make all public visitors see it on GitHub Pages, paste this state into <code>publishedState</code> inside <code>data.js</code> and commit.</p>
+        <p>This moves selected browser-local counts and leaderboard/history settings between devices. It is <b>not a full backup</b>: registrations and payment settings are excluded, and lobby fee overrides are not included. Never use this file to recover server data, include room passwords, paste it into <code>data.js</code>, or commit it; exported history may contain player names.</p>
         <textarea id="state-json-box" placeholder="Exported/imported JSON appears here"></textarea>
         <div class="admin-actions">
           <button class="btn small" id="export-state" type="button">Export State JSON</button>
@@ -215,7 +235,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261008-variable-cs-v1"></script>
-<script src="site.js?v=20261008-variable-cs-v1"></script>
+<script src="data.js?v=20261012-final-update-2-3"></script>
+<script src="site.js?v=20261012-final-update-2-3"></script>
 </body>
 </html>

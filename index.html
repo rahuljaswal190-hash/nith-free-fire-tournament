@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NIT Hamirpur Free Fire Tournament | Student Registration Portal</title>
   <meta name="description" content="Student-organized Free Fire tournament website for NIT Hamirpur with Clash Squad, Battle Royale, slots, rules and leaderboard." />
-  <link rel="stylesheet" href="styles.css?v=20261008-variable-cs-v1" />
+  <link rel="stylesheet" href="styles.css?v=20261012-final-update-2-3" />
 </head>
 <body data-page="home" id="top">
+<a class="skip-link" href="#main-content">Skip to content</a>
 <header class="site-header">
   <a class="brand" href="index.html" aria-label="NIT Hamirpur Free Fire Tournament home">
     <span class="brand-mark">NITH</span>
     <span><strong data-event="shortName">NITH Free Fire Tournament</strong><small>Student-organized portal</small></span>
   </a>
-  <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
-  <nav class="main-nav" aria-label="Main navigation">
+  <button class="menu-toggle" type="button" aria-label="Open navigation" aria-controls="primary-nav" aria-expanded="false">☰</button>
+  <nav id="primary-nav" class="main-nav" aria-label="Main navigation">
     <a href="index.html" data-nav="home">Home</a>
     <a href="clash-squad.html" data-nav="clash">Clash Squad</a>
     <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
@@ -26,21 +27,21 @@
     <a href="admin.html" data-nav="admin">Admin</a>
   </nav>
 </header>
-<div class="notice-ticker"><div id="notice-strip"></div></div>
+<div class="notice-ticker" role="region" aria-label="Tournament announcements"><div id="notice-strip"></div></div>
 
-<main>
+<main id="main-content" tabindex="-1">
   <section class="hero">
     <div class="reveal">
       <span class="eyebrow"><span class="pulse-dot"></span> Student-organized · NIT Hamirpur</span>
       <h1><span>Free Fire</span> tournament portal for a student-organized event around NIT Hamirpur.</h1>
-      <p class="hero-lead">Register solo, duo, trio or squad Battle Royale entries, join Clash Squad, choose a fee tier, check room availability, follow rules, and track leaderboard updates from one trusted tournament portal.</p>
+      <p class="hero-lead">Register solo, duo, trio or squad Battle Royale entries, join Clash Squad, choose an admin-set lobby fee, check room availability, follow rules, and track leaderboard updates from one trusted tournament portal.</p>
       <div class="hero-actions">
         <a class="btn" href="clash-squad.html">Register Clash Squad</a>
         <a class="btn ghost" href="battle-royale.html">Register Battle Royale</a>
         <a class="btn ghost" href="leaderboard.html">View Leaderboard</a>
         <a class="btn ghost" href="status-check.html">Check Approval Status</a>
       </div>
-      <p class="disclaimer">Battle Royale entry tiers are ₹20, ₹40, ₹60, ₹80 and ₹100. Clash Squad tiers are ₹50, ₹70, ₹90 and ₹110. BR Solo is charged per player; BR team formats are per team. Clash Squad is charged once per registered side/team, regardless of team size.</p>
+      <p class="disclaimer">Organizers set each lobby’s fee independently from Free to ₹110 in ₹10 steps. BR Solo is charged per player; BR team formats are per team. Clash Squad is charged once per registered side/team, regardless of team size.</p>
     </div>
     <aside class="hero-card reveal delay-1" aria-label="Tournament dashboard preview">
       <div class="card-line"><span>REGISTRATION PORTAL</span><b>BOOYAH</b></div>
@@ -81,7 +82,7 @@
         <span class="mode-icon">CS</span>
         <h3>Clash Squad</h3>
         <p>Choose Normal or One Tap and select a side size from 1v1 to 4v4. Each room has two sides and one match; the winner is rewarded after verification.</p>
-        <ul><li>Solo, Duo, Trio and Squad sides</li><li>Two sides per custom room</li><li>₹50–₹110 per side/team</li></ul>
+        <ul><li>Solo, Duo, Trio and Squad sides</li><li>Two sides per custom room</li><li>Admin-set Free–₹110 per side/team</li></ul>
         <a class="btn small" href="clash-squad.html">Open Clash Squad Page</a>
       </article>
       <article class="mode-card reveal delay-1">
@@ -96,9 +97,9 @@
 
   <section class="section">
     <div class="section-head reveal">
-      <span class="eyebrow">Fee tiers</span>
-      <h2>Battle Royale starts at ₹20, Clash Squad at ₹50</h2>
-      <p>Battle Royale fee tiers are ₹20, ₹40, ₹60, ₹80 and ₹100. Clash Squad tiers are ₹50, ₹70, ₹90 and ₹110. BR Solo is per player; BR team formats are per team. CS is charged per registered side/team for every side size. Battle Royale target rewards apply when lobby conditions are met; final prize may vary according to confirmed entries and organizer announcement.</p>
+      <span class="eyebrow">Lobby entry fees</span>
+      <h2>Flexible, admin-set fees for every lobby</h2>
+      <p>Organizers can set each BR or CS lobby from Free to ₹110 in ₹10 increments. BR Solo is charged per player; BR team formats are per team. CS is charged per registered side/team. Any target reward remains subject to confirmed entries and organizer announcement.</p>
     </div>
     <div class="fee-grid" id="home-fee-grid"></div>
   </section>
@@ -111,7 +112,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261008-variable-cs-v1"></script>
-<script src="site.js?v=20261008-variable-cs-v1"></script>
+<script src="data.js?v=20261012-final-update-2-3"></script>
+<script src="site.js?v=20261012-final-update-2-3"></script>
 </body>
 </html>

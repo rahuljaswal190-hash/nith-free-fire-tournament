@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Battle Royale Registration | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Register for Battle Royale lobbies with 12 teams, 3 matches and top 3 leaderboard selection." />
-  <link rel="stylesheet" href="styles.css?v=20261008-variable-cs-v1" />
+  <link rel="stylesheet" href="styles.css?v=20261012-final-update-2-3" />
 </head>
 <body data-page="battle" id="top">
+<a class="skip-link" href="#main-content">Skip to content</a>
 <header class="site-header">
   <a class="brand" href="index.html" aria-label="NIT Hamirpur Free Fire Tournament home">
     <span class="brand-mark">NITH</span>
     <span><strong data-event="shortName">NITH Free Fire Tournament</strong><small>Student-organized portal</small></span>
   </a>
-  <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
-  <nav class="main-nav" aria-label="Main navigation">
+  <button class="menu-toggle" type="button" aria-label="Open navigation" aria-controls="primary-nav" aria-expanded="false">☰</button>
+  <nav id="primary-nav" class="main-nav" aria-label="Main navigation">
     <a href="index.html" data-nav="home">Home</a>
     <a href="clash-squad.html" data-nav="clash">Clash Squad</a>
     <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
@@ -26,9 +27,9 @@
     <a href="admin.html" data-nav="admin">Admin</a>
   </nav>
 </header>
-<div class="notice-ticker"><div id="notice-strip"></div></div>
+<div class="notice-ticker" role="region" aria-label="Tournament announcements"><div id="notice-strip"></div></div>
 
-<main>
+<main id="main-content" tabindex="-1">
   <section class="hero compact">
     <div class="reveal">
       <span class="eyebrow"><span class="pulse-dot"></span> Battle Royale</span>
@@ -62,7 +63,7 @@
       </div>
       <form class="form-card" data-registration-form data-mode="br">
   <h2>Battle Royale Registration</h2>
-  <p>Entry starts from ₹20. Solo fee is per player; Duo, Trio and Squad fee is per team. A lobby slot number is reserved when you register; your approval status remains pending until the organizer reviews it.</p>
+  <p>Each lobby’s fee is set by the organizer from Free to ₹110 in ₹10 steps. Solo fee is per player; Duo, Trio and Squad fee is per team. A lobby slot number is reserved when you register; approval remains pending until organizer review.</p>
   <div class="field-grid">
     <label>Entry / Team Name<input name="teamName" placeholder="Optional for Solo, example: NITH Warriors" /></label>
     <label>IGL / Player Name<input required name="iglName" placeholder="Solo player or team IGL name" /></label>
@@ -95,7 +96,7 @@
 </div>
   </div>
   <div class="payment-instructions" data-payment-instructions aria-live="polite"></div>
-  <label>Payment UTR / Reference<input required name="paymentRef" placeholder="Enter UTR/reference, or write Pay after confirmation" /></label>
+  <label>Payment UTR / Reference<input required name="paymentRef" data-payment-reference placeholder="Enter UTR/reference, or write Pay after confirmation" /></label>
   <label class="checkbox-line"><input type="checkbox" name="acceptedRules" required /> I confirm my entry/team has read the rules, fair-play policy, payment/prize variation note, and room confirmation process.</label>
   <button class="btn full" type="submit">Submit Battle Royale Registration</button>
 </form>
@@ -125,7 +126,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261008-variable-cs-v1"></script>
-<script src="site.js?v=20261008-variable-cs-v1"></script>
+<script src="data.js?v=20261012-final-update-2-3"></script>
+<script src="site.js?v=20261012-final-update-2-3"></script>
 </body>
 </html>

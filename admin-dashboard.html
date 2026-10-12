@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Live Dashboard | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Admin-only live dashboard for registrations, players and payments." />
-  <link rel="stylesheet" href="styles.css?v=20261008-variable-cs-v1" />
+  <link rel="stylesheet" href="styles.css?v=20261012-final-update-2-3" />
 </head>
 <body data-page="dashboard" id="top">
+<a class="skip-link" href="#main-content">Skip to content</a>
 <header class="site-header">
   <a class="brand" href="index.html" aria-label="NIT Hamirpur Free Fire Tournament home">
     <span class="brand-mark">NITH</span>
     <span><strong data-event="shortName">NITH Free Fire Tournament</strong><small>Student-organized portal</small></span>
   </a>
-  <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
-  <nav class="main-nav" aria-label="Main navigation">
+  <button class="menu-toggle" type="button" aria-label="Open navigation" aria-controls="primary-nav" aria-expanded="false">☰</button>
+  <nav id="primary-nav" class="main-nav" aria-label="Main navigation">
     <a href="index.html" data-nav="home">Home</a>
     <a href="clash-squad.html" data-nav="clash">Clash Squad</a>
     <a href="battle-royale.html" data-nav="battle">Battle Royale</a>
@@ -26,31 +27,36 @@
     <a href="admin.html" data-nav="admin">Admin</a>
   </nav>
 </header>
-<div class="notice-ticker"><div id="notice-strip"></div></div>
+<div class="notice-ticker" role="region" aria-label="Tournament announcements"><div id="notice-strip"></div></div>
 
-<main>
+<main id="main-content" tabindex="-1">
   <section class="hero compact">
     <div class="reveal">
       <span class="eyebrow">Admin dashboard</span>
       <h1 class="page-title">Live registrations, players and <span>payment totals</span>.</h1>
-      <p class="page-lead">Unlock with the admin PIN set in Render under TOURNAMENT_ADMIN_PIN to see registrations, approved players, and payment totals.</p>
+      <p class="page-lead">Sign in with the private admin PIN configured in the server environment as <code>TOURNAMENT_ADMIN_PIN</code>. There is no default PIN. Use a long, unique value; a four-digit PIN is weak for a public admin panel.</p>
     </div>
   </section>
 
-  <section class="section">
+  <section class="section" id="dashboard-login-box">
     <div class="admin-box">
-      <h2>Unlock dashboard</h2>
+      <h2>Admin sign-in</h2>
       <div class="filters">
-        <label>Admin PIN<input id="dashboard-pin" type="password" inputmode="numeric" placeholder="Enter PIN" /></label>
-        <button class="btn" id="dashboard-unlock" type="button">Unlock Dashboard</button>
+        <label>Admin PIN<input id="dashboard-pin" type="password" autocomplete="current-password" maxlength="256" placeholder="Enter your admin PIN" /></label>
+        <button class="btn" id="dashboard-unlock" type="button">Sign in</button>
       </div>
     </div>
   </section>
 
   <section class="section hidden" id="dashboard-panel">
+    <div class="admin-actions">
+      <button class="btn small" id="dashboard-refresh" type="button">Refresh registrations</button>
+      <button class="btn small ghost" id="dashboard-logout" type="button">Sign out</button>
+    </div>
     <div class="stats-grid" id="admin-live-summary"></div>
     <div class="admin-box full">
       <h2>Registered entries</h2>
+      <p>Registration details are loaded from the authenticated server summary. Use Refresh registrations to retrieve the latest data.</p>
       <div id="dashboard-registrations"></div>
     </div>
   </section>
@@ -64,7 +70,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261008-variable-cs-v1"></script>
-<script src="site.js?v=20261008-variable-cs-v1"></script>
+<script src="data.js?v=20261012-final-update-2-3"></script>
+<script src="site.js?v=20261012-final-update-2-3"></script>
 </body>
 </html>

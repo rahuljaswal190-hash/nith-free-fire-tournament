@@ -77,7 +77,6 @@
       supportChannel: "Organizer WhatsApp/contact to be added",
       whatsappNumber: "",
       upiId: "",
-      adminPin: "2026",
       disclaimer: "This is a student-organized tournament around NIT Hamirpur. It is not affiliated with, endorsed by, or sponsored by Garena or Free Fire."
     },
     economics: {
@@ -87,9 +86,9 @@
       roomsPerTier,
       payoutType: "entry-based",
       feeRule: "Battle Royale Solo fee is per player; Battle Royale Duo, Trio and Squad fees are per team. Clash Squad fees are per registered side/team, for Solo (1v1) through Squad (4v4). Prize is entry-based and may vary with confirmed entries and organizer announcement.",
-      starterPrizeNote: "The ₹20 Battle Royale full-lobby target reward pool starts from ₹200. Final prize may vary according to format, confirmed teams, payments, and organizer announcement.",
+      starterPrizeNote: "Indicative Battle Royale target reward pools scale with the fee and full-lobby conditions. Final prize may vary according to format, confirmed teams, payments, and organizer announcement.",
       brFullLobbyPrizeByTier: { 20: 200, 40: 400, 60: 600, 80: 800, 100: 1000 },
-      csPrizeNote: "Clash Squad starts from ₹50 per registered side/team. The fee is not multiplied by the number of players on that side. Winner reward is entry-based and announced per room after both sides are confirmed."
+      csPrizeNote: "Clash Squad fee is set per lobby and is not multiplied by the number of players on that side. Winner reward is entry-based and announced per room after both sides are confirmed."
     },
     battleFormats,
     csFormats,

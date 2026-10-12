@@ -1,41 +1,47 @@
-# Security hardening notes
+# Security and deployment notes
 
-**Scope:** source-level review and changes in this workspace. This is not a production penetration test or a guarantee of security.
+**Scope:** source-level review of this workspace and local regression checks. This is not a live Vercel/Atlas penetration test or a guarantee of security.
 
-## What was changed
+## Authentication and request protections
 
-- **Admin credential exposure:** removed the browser-side/default admin PIN flow. Treat the previously exposed PIN as compromised; never reuse it. Admin sign-in now checks a salted PBKDF2-HMAC-SHA256 verifier (`600,000` iterations) from `TOURNAMENT_ADMIN_PASSWORD_HASH`. The generator prompts without echoing the passphrase. Use a unique passphrase of at least 16 characters. If the environment variable is absent or invalid, sign-in fails closed.
-- **Admin sessions:** successful sign-in creates a random, server-side session with an 8-hour lifetime. The browser receives an `HttpOnly`, `SameSite=Strict` cookie, marked `Secure` for HTTPS, plus a CSRF token required for admin writes. Sign-out invalidates the session.
-- **Request protections:** added same-origin checks, JSON content-type/object checks, a 2 MB request-body limit, input validation and server-derived registration fields. Login and API routes have per-IP/in-process rate limits. Client sockets time out after 15 seconds and production request threads are bounded.
-- **Static-file exposure:** the server now serves an explicit list of public site assets rather than arbitrary project files. Source, configuration, documentation, tests, runtime JSON, and backup files are not served as static assets.
-- **Browser protections:** responses include a Content Security Policy, frame/content-type/referrer/permissions/cross-origin protections, and HTTPS HSTS when the request is identified as HTTPS. No CORS access is enabled.
-- **State-file handling:** JSON writes are atomic, keep a previous valid backup, and request owner-only file permissions where supported. The JSON still contains personal/contact/payment-reference data and admin-only room credentials; restrictive permissions are not encryption. The browser Admin State JSON transfer was clarified as partial, excludes room credentials, registrations, and payment settings, and must not be used as a server recovery backup.
-- **Secret hygiene:** the current source scan found no API-key/private-key or production credential assignments. There is no `.env` file in the workspace. The test suite contains a dummy test-only passphrase. Git metadata/history and remote repository contents were not available to scan.
-- **Dependencies:** the app uses Python’s standard library and has no third-party Python or JavaScript dependencies to update.
+- Admin sign-in reads only `TOURNAMENT_ADMIN_PIN` from the server environment. There is no default PIN, browser-side credential, source-code fallback, or hash-generation script. If unset, sign-in fails closed. Use a long, unique passphrase; a four-digit PIN is weak on a public admin panel.
+- On Vercel, admin sessions are 8-hour HMAC-SHA256-signed stateless cookies so they remain valid across serverless instances. `TOURNAMENT_SESSION_SECRET` must be set privately in Vercel Environment Variables and contain at least 32 characters. The cookie is `HttpOnly`, `SameSite=Strict`, `Secure` on HTTPS, and carries a CSRF token bound to its signed payload. Clearing the cookie signs out the browser; a stolen/copied cookie remains valid until expiry or session-secret rotation.
+- On the conventional local/Render Python server, the existing in-process server-side session behavior remains. Session/rate-limit state is not shared across processes.
+- API writes require a same-origin `Origin`, JSON object payloads, a CSRF token for admin routes, validated server-derived registration fields, and a request-body limit. Security headers are applied by the Python handler and by `vercel.json` for Vercel static pages. No CORS access is enabled.
+- IP/API rate limits are currently in process memory. On Vercel they may reset or differ across separate function instances; they are only a lightweight safeguard. For a publicly exposed admin panel, enable suitable Vercel edge/bot protections or use a shared rate-limit service. This deployment does not claim distributed rate limiting or MFA.
 
-## Verification performed
+## Vercel routing, static assets, and storage
 
-- `python3 -m unittest discover -s tests -v` — **27 tests passed**. Tests cover admin login/session/CSRF/rate limiting, origin/content-type checks, static-file restrictions, registration validation, payment/room privacy, safe partial State JSON transfer, bounded-server configuration, and existing tournament behavior.
-- `python3 -m py_compile server.py generate_admin_hash.py tests/test_server_api.py` — passed.
-- `node --check site.js` and `node --check data.js` — passed.
-- HTML scan found no inline script blocks, consistent with the response CSP.
+- Public website files live under `public/`; `vercel.json` sets that directory as the static output and routes `/api/*` through one Python Function at `api/dispatch.py`. The dispatcher only forwards known API paths. `server.py`, docs, tests, deployment configuration, and runtime state are outside the static output; `.vercelignore` also excludes docs/tests and local state from the deployment upload.
+- Vercel function filesystems are not treated as durable. When `VERCEL=1`/`VERCEL_ENV` is detected, the app requires `MONGODB_URI` before reading or writing state; it returns 503 rather than using local JSON if the URI is absent or MongoDB is unavailable. The Vercel admin status also identifies the missing persistent store. `/tmp` is only a scratch path, not a persistence solution.
+- MongoDB uses the existing single state document `_id: "state"`, with top-level tournament state. A configured database outage returns 503 without local fallback. The application-level state document includes registrations, contact/payment references, lobby-fee overrides, payment settings/QR, room information, and result history. Use a least-privilege database account, backups, and provider-side access controls.
+- State updates use an in-process lock and replace the full MongoDB state document. Vercel can run multiple function instances, so simultaneous writes from different instances can race. This remains a known limitation for concurrent registrations/admin edits; keep off-host backups and verify data after cutover.
+- On conventional local/Render server mode, JSON remains available when `MONGODB_URI` is unset. File permissions and atomic replacement protect local writes where supported, but durability depends on the host's actual storage. The existing `render.yaml` remains unchanged on Render Free and is not used by Vercel.
+- The Admin State JSON transfer is partial: it omits registrations, payment settings and QR, room credentials, and lobby-fee overrides. It is not a server recovery backup.
 
-These checks validate the local code paths exercised by the suite; they do not validate Render’s live environment, TLS/proxy configuration, backups, or every browser/device.
+## Secret hygiene and external data
 
-## Important remaining risks and deployment limits
+- No literal production MongoDB URI or credential is intentionally present in the current source. A database credential was exposed in an earlier user-pasted snippet; consider it compromised, rotate it in the database provider, and use only the replacement URI in Vercel Environment Variables. Do not reuse or paste the exposed/new credential in source, Git, `vercel.json`, `public/data.js`, or chat.
+- Set `TOURNAMENT_ADMIN_PIN`, `TOURNAMENT_SESSION_SECRET`, and `MONGODB_URI` directly in Vercel's protected Environment Variable settings; do not put actual values in the ZIP or repository. Generate a fresh high-entropy session secret locally, for example with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`.
+- Public `/api/state` intentionally includes public event data, released room details, published payment instructions/QR, and approved leaderboard data. Pending registrations, player contact details, and payment references remain admin-only.
+- The local workspace has no Git metadata, so commit history or remote repository contents could not be scanned. No Vercel project, environment values, live MongoDB connection, or live deployment was inspected or changed.
 
-1. **Set a new live admin verifier before deploying.** On a trusted computer run `python3 generate_admin_hash.py`, then set the printed verifier as `TOURNAMENT_ADMIN_PASSWORD_HASH` in the existing Render service’s Environment settings. Do not paste the password or verifier into chat, source control, or a public document. The new code ignores `TOURNAMENT_ADMIN_PIN`; remove the old variable after the new sign-in is verified. Until the new hash is configured, admin sign-in is disabled.
-2. **Back up live state before deploying.** No Render deployment or environment change was made. This workspace cannot access the live service’s environment, files, logs, or backup. Render Free local storage is ephemeral; a redeploy/restart can lose JSON state. Setting `TOURNAMENT_DATA_DIR` alone does not make it durable. The app remains on Render Free and no paid disk or plan change was made. For durable operation while staying Free, this app still needs an external durable data store and migration work; that has not been implemented here.
-3. **Payment settings and QR images live in the same JSON state.** They remain until an admin changes/removes them only while that state file survives. Do not treat an app-local backup as off-host disaster recovery. Keep a private, encrypted off-host backup and test recovery.
-4. **Data at rest is not encrypted by this app.** The state file includes personal information and payment references. File permissions reduce exposure on supported local filesystems but do not encrypt it. A managed database with appropriate access controls/encryption and backups is preferable for durable production data.
-5. **Rate limits and sessions are process-local.** They reset on restart and are not shared across multiple instances. They are lightweight safeguards, not a WAF or identity provider. There is one shared admin passphrase and no MFA or per-admin audit identity.
-6. **History and production checks remain unavailable.** The local workspace had no `.git` metadata, so removed credentials cannot be checked or purged from prior commits. No live Render environment values, production source, or current service state could be inspected. If the old PIN or any other secret was committed or reused, rotate it and review repository access/history.
+## Verification performed in the workspace
 
-## Safe rollout checklist
+- `python3 -m unittest discover -s tests -v` — **40 tests passed**, including Vercel rewrite dispatch, session signature/expiry, Vercel fail-closed storage, and the existing fee/tournament/security/MongoDB regression coverage. MongoDB tests use a fake collection; they do not connect to a live cluster.
+- `python3 -m py_compile server.py api/dispatch.py tests/test_server_api.py` — passed.
+- `node --check public/site.js` and `node --check public/data.js` — passed.
+- HTML checks cover all public HTML pages, external script tags, and current cache-busting values.
+- The Vercel CLI was available, but `vercel dev` could not start because the CLI requires account credentials and none were available in this workspace. No Vercel deployment or environment change was performed.
 
-- Before any restart/redeploy, obtain a complete private backup of live registrations and payment settings using a trusted host/backend method. The browser Admin State JSON export is incomplete and cannot supply this backup; if a full copy is unavailable, do not assume the update can recover it.
-- Confirm the service remains on the existing Free plan; do not rely on local JSON for durable records.
-- Generate a fresh unique passphrase and set `TOURNAMENT_ADMIN_PASSWORD_HASH` in the existing service environment before deploying.
-- Deploy the complete updated source set together; do not mix old `data.js`, `site.js`, HTML, or `server.py` with new files.
-- Verify public registration/status, payment instructions, admin sign-in/sign-out, approval, and result publishing. Confirm the storage warning is understood; a custom JSON path is not proof of durable storage.
-- Remove the obsolete PIN environment variable only after confirming the new admin login works. Never send secrets through chat or commit them.
+These checks validate only the local code paths exercised here; they do not validate the user's Vercel project settings, a live Vercel Function build, database network allowlists, real credentials, or every device/browser.
+
+## Rollout checklist
+
+1. Before cutover, secure a complete, private backup. If existing live data is already in MongoDB, use that same database/collection with a newly rotated credential and verify it. If the old host used local JSON, perform a trusted full-state migration first; this ZIP cannot recover an unbundled server file.
+2. In Vercel Environment Variables, set `MONGODB_URI`, a long unique `TOURNAMENT_ADMIN_PIN`, and a fresh high-entropy `TOURNAMENT_SESSION_SECRET` for the relevant environments. Set optional database/collection overrides only if needed. Never put secret values in `vercel.json` or source.
+3. Deploy the repository root. Keep `public/`, `api/dispatch.py`, `server.py`, `requirements.txt`, and `vercel.json` together; do not set Vercel's project root to `public/`.
+4. Verify public registration/status, free and paid registration, admin sign-in/session restoration, lobby fee changes, registration refresh/approval, payment settings, room release, result publishing, and database connectivity.
+5. Keep backups private and encrypted. If the deployment is public, enable suitable edge/bot protections and monitor MongoDB state size and concurrent edits.
+
+---

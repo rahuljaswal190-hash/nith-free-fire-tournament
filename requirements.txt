@@ -1,4 +1,2 @@
-# No external Python packages are required.
-# The tournament website server uses only Python standard library modules.
-pymongo[srv]
-dnspython
+# MongoDB Atlas support (MONGODB_URI is optional; local JSON mode needs no driver).
+pymongo[srv]>=4.6,<5.0
