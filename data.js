@@ -3,10 +3,10 @@
   const csFeeTiers = [50, 70, 90, 110];
   const roomsPerTier = 3;
   const battleFormats = [
-    { id: "solo", label: "Solo", playersPerEntry: 1, capacity: 12, description: "For solo players. Slots are numbered 1–12 per lobby." },
-    { id: "duo", label: "Duo", playersPerEntry: 2, capacity: 12, description: "For two-player teams. Up to 12 teams per lobby." },
-    { id: "trio", label: "Trio", playersPerEntry: 3, capacity: 12, description: "For three-player teams. Up to 12 teams per lobby." },
-    { id: "squad", label: "Squad", playersPerEntry: 4, capacity: 12, description: "For full four-player squads. Up to 12 teams per lobby." }
+    { id: "solo", label: "Solo", playersPerEntry: 1, capacity: 50, description: "For solo players (50-player lobby). Slots are numbered 1–50 per lobby." },
+    { id: "duo", label: "Duo", playersPerEntry: 2, capacity: 25, description: "For two-player teams (50 players). Up to 25 teams per lobby (slots 1–25)." },
+    { id: "trio", label: "Trio", playersPerEntry: 3, capacity: 16, description: "For three-player teams (48 players). Up to 16 teams per lobby (slots 1–16)." },
+    { id: "squad", label: "Squad", playersPerEntry: 4, capacity: 12, description: "For full four-player squads (48 players). Up to 12 teams per lobby (slots 1–12)." }
   ];
   const csFormats = [
     { id: "solo", label: "Solo · 1v1", playersPerEntry: 1, description: "Register one player per side." },
@@ -96,7 +96,7 @@
       br: {
         title: "Battle Royale scoring",
         killPoint: 1,
-        placement: { 1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1, 11: 0, 12: 0 },
+        placement: Object.assign({ 1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1 }, Object.fromEntries(Array.from({ length: 40 }, (_, idx) => [idx + 11, 0]))),
         note: "Each Battle Royale session plays 3 matches. Match score is kills plus placement points; the leaderboard adds the three match scores into a cumulative total. Top 3 entries/teams are selected after verification."
       },
       cs: {
@@ -120,7 +120,7 @@
       ]
     },
     schedule: [
-      { time: "Before match day", title: "Registration and admin verification", detail: "Players choose a mode, format, and one of three time-linked lobbies. Registration receives a reserved lobby slot; organizer approval is still required (BR slots 1–12, CS two sides per room)." },
+      { time: "Before match day", title: "Registration and admin verification", detail: "Players choose a mode, format, and one of three time-linked lobbies. Registration receives a reserved lobby slot; organizer approval is still required (BR Solo 1–50, Duo 1–25, Trio 1–16, Squad 1–12; CS two sides per room)." },
       { time: "15 minutes before match", title: "Room ID shared privately", detail: "Room ID/password are shared only through the Room Details page after admin release." },
       { time: "Match window", title: "Play the scheduled matches", detail: "Battle Royale entries play 3 matches within their assigned window. Clash Squad sides of the selected 1v1, 2v2, 3v3 or 4v4 size play 1 match. Current timings can be changed by the admin." },
       { time: "After result verification", title: "Match results and leaderboard", detail: "Admin records kills and placements for each BR match or the CS win/loss and round difference. Points and standings update automatically." }
@@ -131,7 +131,7 @@
       roomDetails: {},
       leaderboard: { br: [], cs: [] },
       notices: [
-        "Battle Royale lobby slots are numbered 1–12; Clash Squad slots are 1–2. A submitted slot is reserved while approval is pending.",
+        "Battle Royale lobby slots follow a 50-player custom room (Solo 1–50, Duo 1–25, Trio 1–16, Squad 1–12); Clash Squad slots are 1–2. A submitted slot is reserved while approval is pending.",
         "All listed match times use India Standard Time (IST); the event date will be announced by the organizers.",
         "Solo, Duo, Trio and Squad Battle Royale sections are available for players with or without a full team.",
         "Clash Squad offers 1v1, 2v2, 3v3 and 4v4. Fee is per registered side/team.",

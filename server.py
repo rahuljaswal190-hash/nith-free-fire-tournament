@@ -153,7 +153,8 @@ DEFAULT_SCHEDULE_SETTINGS = {
     "br": {"startTime": "21:00", "durationHours": 1, "gapHours": 0},
     "cs": {"startTime": "21:00", "durationHours": 1, "gapHours": 0},
 }
-BR_PLACEMENT_POINTS = {1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1, 11: 0, 12: 0}
+BR_PLACEMENT_POINTS = {1: 12, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1, **{pos: 0 for pos in range(11, 51)}}
+BR_FORMAT_CAPACITIES = {"SOLO": 50, "DUO": 25, "TRIO": 16, "SQUAD": 12}
 IMAGE_DATA_URL_RE = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")
 MAX_QR_DATA_URL_CHARS = 1_500_000
 
@@ -446,10 +447,11 @@ def _load_state_locked():
     base["scheduleSettings"] = normalize_schedule_settings(base.get("scheduleSettings"))
     payment = base.get("paymentSettings") if isinstance(base.get("paymentSettings"), dict) else {}
     base["paymentSettings"] = {
-        "payeeName": str(payment.get("payeeName") or "")[:100],
-        "upiId": str(payment.get("upiId") or "")[:120],
-        "note": str(payment.get("note") or "")[:500],
+        "payeeName": str(payment.get("payeeName") or os.environ.get("TOURNAMENT_PAYEE_NAME", "")).strip()[:100],
+        "upiId": str(payment.get("upiId") or os.environ.get("TOURNAMENT_UPI_ID", "")).strip()[:120],
+        "note": str(payment.get("note") or os.environ.get("TOURNAMENT_PAYMENT_NOTE", "")).strip()[:500],
         "qrDataUrl": payment.get("qrDataUrl") if valid_image_data_url(payment.get("qrDataUrl")) else "",
+        **({"updatedAt": str(payment.get("updatedAt"))[:64]} if payment.get("updatedAt") else {}),
     }
     changed = mongo_needs_migration
     for reg in base["registrations"]:
@@ -655,7 +657,13 @@ def cs_format_from_room_id(room_id):
 
 
 def room_capacity(room_id):
-    return 2 if str(room_id or "").upper().startswith("CS-") else 12
+    upper = str(room_id or "").strip().upper()
+    if upper.startswith("CS-"):
+        return 2
+    parts = upper.split("-")
+    if len(parts) >= 2 and parts[0] == "BR" and parts[1] in BR_FORMAT_CAPACITIES:
+        return BR_FORMAT_CAPACITIES[parts[1]]
+    return 12
 
 
 def valid_lobby_fee(value):
@@ -686,12 +694,14 @@ def room_metadata(room_id, room_fees=None):
         players = {"SOLO": 1, "DUO": 2, "TRIO": 3, "SQUAD": 4}
         label = labels[format_id]
         slot = int(slot_text)
+        base_fee = int(fee_text)
         return {
             "id": room_id, "mode": "br", "modeLabel": "Battle Royale",
             "format": format_id.lower(), "formatLabel": label,
-            "playersPerEntry": players[format_id], "fee": configured_lobby_fee(room_id, int(fee_text), room_fees),
+            "playersPerEntry": players[format_id], "baseFee": base_fee,
+            "fee": configured_lobby_fee(room_id, base_fee, room_fees),
             "feeRule": "per player" if format_id == "SOLO" else "per team",
-            "variant": "", "slot": slot, "capacity": 12,
+            "variant": "", "slot": slot, "capacity": BR_FORMAT_CAPACITIES[format_id],
             "title": f"{label} Battle Royale Lobby {slot}",
         }
     cs_match = re.fullmatch(r"CS-(NM|OT)(?:-(SOLO|DUO|TRIO))?-(50|70|90|110)-([1-3])", room_id)
@@ -702,10 +712,12 @@ def room_metadata(room_id, room_fees=None):
         players = {"SOLO": 1, "DUO": 2, "TRIO": 3, "SQUAD": 4}
         variant = "One Tap" if variant_code == "OT" else "Normal"
         slot = int(slot_text)
+        base_fee = int(fee_text)
         return {
             "id": room_id, "mode": "cs", "modeLabel": "Clash Squad",
             "format": format_id.lower(), "formatLabel": labels[format_id],
-            "playersPerEntry": players[format_id], "fee": configured_lobby_fee(room_id, int(fee_text), room_fees),
+            "playersPerEntry": players[format_id], "baseFee": base_fee,
+            "fee": configured_lobby_fee(room_id, base_fee, room_fees),
             "feeRule": "per registered side", "variant": variant,
             "slot": slot, "capacity": 2,
             "title": f"{variant} {labels[format_id]} Clash Squad Room {slot}",
@@ -1598,8 +1610,18 @@ class Handler(SimpleHTTPRequestHandler):
 
         if path == "/api/admin/lobby-fee":
             room_id = str(payload.get("roomId") or "").strip().upper()
+            room = room_metadata(room_id)
             fee = payload.get("fee")
-            if not room_metadata(room_id) or not valid_lobby_fee(fee):
+            reset_fee = payload.get("reset") is True or (isinstance(fee, str) and fee.strip().lower() == "default")
+            if not room:
+                self.send_json({"ok": False, "error": "Choose a valid lobby and an entry fee from Free to ₹110 in ₹10 steps."}, 400)
+                return
+            if reset_fee:
+                state.setdefault("roomFees", {}).pop(room_id, None)
+                save_state(state)
+                self.send_json({"ok": True, "message": "Lobby entry fee reset to default.", "state": public_state(state), **admin_summary(state)})
+                return
+            if not valid_lobby_fee(fee):
                 self.send_json({"ok": False, "error": "Choose a valid lobby and an entry fee from Free to ₹110 in ₹10 steps."}, 400)
                 return
             state.setdefault("roomFees", {})[room_id] = int(fee)
@@ -1643,7 +1665,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         if path == "/api/admin/payment-settings":
             settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
-            qr = settings.get("qrDataUrl", "")
+            existing_payment = state.get("paymentSettings") if isinstance(state.get("paymentSettings"), dict) else {}
+            qr = settings.get("qrDataUrl") if "qrDataUrl" in settings else existing_payment.get("qrDataUrl", "")
             if not valid_image_data_url(qr):
                 self.send_json({"ok": False, "error": "Upload a PNG, JPG, or WebP QR image up to about 1 MB."}, 400)
                 return

@@ -1,5 +1,6 @@
 const DATA = window.TOURNAMENT_DATA;
 const STATE_KEY = "nithFreeFireTournamentStateV3";
+const PAYMENT_BACKUP_KEY = "nithAdminPaymentBackupV1";
 let toastTimer;
 let lastSummary = "";
 let SERVER_AVAILABLE = false;
@@ -14,6 +15,7 @@ let ROOM_QR_DATA = "";
 let EDITING_REGISTRATION_ID = "";
 let lastStatusSearch = null;
 let ADMIN_CALENDAR_SELECTED_DATE = "";
+let paymentAutoRestored = false;
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => Array.from(scope.querySelectorAll(selector));
@@ -170,12 +172,44 @@ function getRooms({ mode, fee, variant, format } = {}) {
   });
 }
 
-function getFeeTiers(mode) {
+function getFeeTiers(mode, { format, variant } = {}) {
   const state = loadState();
   const fees = DATA.rooms
-    .filter((room) => !mode || room.mode === mode)
+    .filter((room) => {
+      if (mode && room.mode !== mode) return false;
+      if (format && room.format !== format) return false;
+      if (variant && room.variant !== variant) return false;
+      return true;
+    })
     .map((room) => currentLobbyFee(room, state));
   return Array.from(new Set(fees)).sort((a, b) => a - b);
+}
+
+function hasPaymentDetails(payment) {
+  return Boolean(payment && (clean(payment.upiId) || clean(payment.payeeName) || clean(payment.note) || clean(payment.qrDataUrl)));
+}
+
+function loadPaymentBackup() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PAYMENT_BACKUP_KEY) || "null");
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePaymentBackup(payment) {
+  if (!hasPaymentDetails(payment)) return;
+  try {
+    localStorage.setItem(PAYMENT_BACKUP_KEY, JSON.stringify({
+      payeeName: clean(payment.payeeName),
+      upiId: clean(payment.upiId),
+      note: clean(payment.note),
+      qrDataUrl: String(payment.qrDataUrl || "")
+    }));
+  } catch {
+    // Ignore localStorage quota errors.
+  }
 }
 
 function getRoom(roomId) {
@@ -488,26 +522,30 @@ function renderHome() {
 
 function renderClashPage() {
   const params = new URLSearchParams(location.search);
-  const defaultFee = Number(params.get("fee")) || getFeeTiers("cs")[0];
   const defaultFormat = (DATA.csFormats || []).some((format) => format.id === params.get("format")) ? params.get("format") : "squad";
   const tierFilter = $("#cs-tier-filter");
   const variantFilter = $("#cs-variant-filter");
   const formatFilter = $("#cs-format-filter");
-  if (tierFilter) populateFeeSelect(tierFilter, defaultFee, "cs");
+  const activeFormat = formatFilter?.value || defaultFormat;
   if (variantFilter && !variantFilter.value) variantFilter.value = "Normal";
-  populateCSFormatSelect(formatFilter, defaultFormat);
+  const activeVariant = variantFilter?.value || "Normal";
+  const paramFee = params.has("fee") ? Number(params.get("fee")) : undefined;
+  const initialFee = tierFilter?.value !== undefined && tierFilter?.value !== "" ? Number(tierFilter.value) : (Number.isFinite(paramFee) ? paramFee : getFeeTiers("cs", { format: activeFormat, variant: activeVariant })[0]);
+  if (tierFilter) populateFeeSelect(tierFilter, initialFee, "cs", { format: activeFormat, variant: activeVariant });
+  populateCSFormatSelect(formatFilter, activeFormat);
 
   const formVariant = $("#cs-form-variant");
   const formFormat = $("#cs-form-format");
-  populateCSFormatSelect(formFormat, defaultFormat);
+  populateCSFormatSelect(formFormat, activeFormat);
   const csForm = $('[data-registration-form][data-mode="cs"]');
 
   const rerender = () => {
-    const fee = Number(tierFilter?.value || defaultFee);
     const variant = variantFilter?.value || formVariant?.value || "Normal";
     const format = formatFilter?.value || formFormat?.value || defaultFormat;
     if (formVariant) formVariant.value = variant;
     if (formFormat) formFormat.value = format;
+    if (tierFilter) populateFeeSelect(tierFilter, tierFilter.value, "cs", { format, variant });
+    const fee = tierFilter?.value !== undefined && tierFilter?.value !== "" ? Number(tierFilter.value) : getFeeTiers("cs", { format, variant })[0];
     const rooms = getRooms({ mode: "cs", fee, variant, format });
     renderRoomCards("#cs-room-grid", rooms);
     populateRoomSelect("#cs-room-select", rooms);
@@ -519,35 +557,38 @@ function renderClashPage() {
     if (prize) prize.textContent = `${variant} Clash Squad ${formatInfo?.label || ""} · ${formatEntryFee(fee)} per registered side/team. ${DATA.economics.csPrizeNote}`;
   };
 
-  tierFilter?.addEventListener("change", rerender);
-  variantFilter?.addEventListener("change", rerender);
-  formatFilter?.addEventListener("change", rerender);
-  formVariant?.addEventListener("change", () => {
+  if (tierFilter) tierFilter.onchange = rerender;
+  if (variantFilter) variantFilter.onchange = rerender;
+  if (formatFilter) formatFilter.onchange = rerender;
+  if (formVariant) formVariant.onchange = () => {
     if (variantFilter) variantFilter.value = formVariant.value;
     rerender();
-  });
-  formFormat?.addEventListener("change", () => {
+  };
+  if (formFormat) formFormat.onchange = () => {
     if (formatFilter) formatFilter.value = formFormat.value;
     rerender();
-  });
+  };
   rerender();
 }
 
 function renderBattlePage() {
   const params = new URLSearchParams(location.search);
-  const defaultFee = Number(params.get("fee")) || getFeeTiers("br")[0];
   const defaultFormat = params.get("format") || "solo";
   const tierFilter = $("#br-tier-filter");
   const formatFilter = $("#br-format-filter");
   const formFormat = $("#br-form-format");
-  if (tierFilter) populateFeeSelect(tierFilter, defaultFee, "br");
-  populateFormatSelect(formatFilter, defaultFormat);
-  populateFormatSelect(formFormat, defaultFormat);
+  const activeFormat = formatFilter?.value || defaultFormat;
+  const paramFee = params.has("fee") ? Number(params.get("fee")) : undefined;
+  const initialFee = tierFilter?.value !== undefined && tierFilter?.value !== "" ? Number(tierFilter.value) : (Number.isFinite(paramFee) ? paramFee : getFeeTiers("br", { format: activeFormat })[0]);
+  if (tierFilter) populateFeeSelect(tierFilter, initialFee, "br", { format: activeFormat });
+  populateFormatSelect(formatFilter, activeFormat);
+  populateFormatSelect(formFormat, activeFormat);
 
   const rerender = () => {
-    const fee = Number(tierFilter?.value || defaultFee);
     const format = formatFilter?.value || formFormat?.value || defaultFormat;
     if (formFormat) formFormat.value = format;
+    if (tierFilter) populateFeeSelect(tierFilter, tierFilter.value, "br", { format });
+    const fee = tierFilter?.value !== undefined && tierFilter?.value !== "" ? Number(tierFilter.value) : getFeeTiers("br", { format })[0];
     const rooms = getRooms({ mode: "br", fee, format });
     const formatInfo = battleFormatById(format);
     renderRoomCards("#br-room-grid", rooms);
@@ -562,12 +603,12 @@ function renderBattlePage() {
     syncRegistrationSchedule(brForm, "room");
   };
 
-  tierFilter?.addEventListener("change", rerender);
-  formatFilter?.addEventListener("change", rerender);
-  formFormat?.addEventListener("change", () => {
+  if (tierFilter) tierFilter.onchange = rerender;
+  if (formatFilter) formatFilter.onchange = rerender;
+  if (formFormat) formFormat.onchange = () => {
     if (formatFilter) formatFilter.value = formFormat.value;
     rerender();
-  });
+  };
   rerender();
 }
 
@@ -615,9 +656,13 @@ function renderModeStats(selector, rooms) {
 }
 
 
-function populateFeeSelect(select, selectedFee, mode = "br") {
+function populateFeeSelect(select, selectedFee, mode = "br", filters = {}) {
   if (!select) return;
-  select.innerHTML = getFeeTiers(mode).map((fee) => `<option value="${fee}" ${Number(selectedFee) === fee ? "selected" : ""} >${formatEntryFee(fee)}</option>`).join("");
+  const tiers = getFeeTiers(mode, filters);
+  const numericSelected = selectedFee !== undefined && selectedFee !== null && selectedFee !== "" ? Number(selectedFee) : NaN;
+  const activeFee = tiers.includes(numericSelected) ? numericSelected : tiers[0];
+  select.innerHTML = tiers.map((fee) => `<option value="${fee}" ${fee === activeFee ? "selected" : ""} >${formatEntryFee(fee)}</option>`).join("");
+  if (activeFee !== undefined) select.value = String(activeFee);
 }
 
 
@@ -1608,8 +1653,25 @@ function renderAdminCalendar(registrations = []) {
     dayDetails.innerHTML = `<h3>${escapeHtml(dateTitle)}</h3><div class="calendar-date-status" role="status">${registrationsStatus}${resultsStatus}<p class="disclaimer">The match date field below is set to ${escapeHtml(dateTitle)}.</p></div>${table}`;
   }
 }
+function updatePaymentPersistenceStatus(payment = {}, storageInfo = null) {
+  const statusEl = $("#payment-persistence-status");
+  if (!statusEl) return;
+  const active = hasPaymentDetails(payment);
+  const backend = storageInfo?.backend === "mongodb" ? "MongoDB Atlas" : "server storage";
+  if (active) {
+    const parts = [];
+    if (clean(payment.upiId)) parts.push(`UPI: ${clean(payment.upiId)}`);
+    if (clean(payment.payeeName)) parts.push(`Payee: ${clean(payment.payeeName)}`);
+    if (clean(payment.qrDataUrl)) parts.push("QR image saved");
+    const stamp = payment.updatedAt ? ` · Last saved ${new Date(payment.updatedAt).toLocaleString("en-IN")}` : "";
+    statusEl.textContent = `Saved in ${backend} (${parts.join(" · ")})${stamp}. Persists automatically across all Vercel redeployments.`;
+  } else {
+    statusEl.textContent = `Saved in ${backend} once published — your UPI ID, payee name, note, and QR code persist automatically across all Vercel redeployments.`;
+  }
+}
+
 function populateAdminSettingsFromSummary(summary = {}) {
-  const settings = summary.scheduleSettings || { br: { startTime: "21:00", durationHours: 1, gapHours: 0 }, cs: { startTime: "21:00", durationHours: 1, gapHours: 0 } };
+  const settings = summary.scheduleSettings || loadState().scheduleSettings || { br: { startTime: "21:00", durationHours: 1, gapHours: 0 }, cs: { startTime: "21:00", durationHours: 1, gapHours: 0 } };
   ["br", "cs"].forEach((mode) => {
     const conf = settings[mode] || {};
     populateAdminTimeSelect($(mode === "br" ? "#br-start-time" : "#cs-start-time"), conf.startTime || "21:00");
@@ -1618,12 +1680,28 @@ function populateAdminSettingsFromSummary(summary = {}) {
     if (duration) duration.value = String(conf.durationHours || 1);
     if (gap) gap.value = String(conf.gapHours ?? 0);
   });
-  const payment = summary.paymentSettings || {};
+  const serverPayment = summary.paymentSettings || loadState().paymentSettings || {};
+  let payment = serverPayment;
+  if (hasPaymentDetails(serverPayment)) {
+    savePaymentBackup(serverPayment);
+  } else {
+    const backup = loadPaymentBackup();
+    if (hasPaymentDetails(backup)) {
+      payment = backup;
+      if (!paymentAutoRestored && SERVER_AVAILABLE && currentAdminCsrf) {
+        paymentAutoRestored = true;
+        apiPost("/api/admin/payment-settings", { settings: backup })
+          .then(() => refreshStateFromServer())
+          .catch(() => {});
+      }
+    }
+  }
   if ($("#payment-payee")) $("#payment-payee").value = payment.payeeName || "";
   if ($("#payment-upi-id")) $("#payment-upi-id").value = payment.upiId || "";
   if ($("#payment-note")) $("#payment-note").value = payment.note || "";
   PAYMENT_QR_DATA = payment.qrDataUrl || "";
   setQrPreview("payment", PAYMENT_QR_DATA);
+  updatePaymentPersistenceStatus(payment, summary.storageInfo);
   const boardView = $("#leaderboard-default-view");
   if (boardView) boardView.value = summary.leaderboardSettings?.defaultView === "all" ? "all" : "latest";
   updateAdminStorageStatus(summary.storageInfo);
@@ -1680,14 +1758,20 @@ function setupAdminPage() {
 }
 
 function setupAdminListeners() {
-  $("#admin-mode")?.addEventListener("change", () => { const mode = $("#admin-mode")?.value || "br"; populateFeeSelect($("#admin-fee"), getFeeTiers(mode)[0], mode); updateAdminRoomChoices(); });
+  $("#admin-mode")?.addEventListener("change", () => { updateAdminRoomChoices(); });
   $("#admin-fee")?.addEventListener("change", updateAdminRoomChoices);
   $("#admin-format")?.addEventListener("change", updateAdminRoomChoices);
   $("#admin-cs-format")?.addEventListener("change", updateAdminRoomChoices);
   $("#admin-variant")?.addEventListener("change", updateAdminRoomChoices);
   ["#lobby-fee-mode", "#lobby-fee-br-format", "#lobby-fee-cs-format", "#lobby-fee-variant", "#lobby-fee-slot"].forEach((selector) => $(selector)?.addEventListener("change", populateLobbyFeeRooms));
   $("#lobby-fee-room")?.addEventListener("change", syncLobbyFeeValue);
-  $("#save-lobby-fee")?.addEventListener("click", saveLobbyFee);
+  $("#lobby-fee-entry-type")?.addEventListener("change", handleLobbyFeeEntryTypeChange);
+  $("#lobby-fee-value")?.addEventListener("change", handleLobbyFeeAmountChange);
+  $("#save-lobby-fee")?.addEventListener("click", () => saveLobbyFee());
+  $("#make-lobby-free")?.addEventListener("click", () => saveLobbyFee({ feeOverride: 0 }));
+  $("#decrease-lobby-fee")?.addEventListener("click", () => adjustLobbyFeeByStep(-10));
+  $("#increase-lobby-fee")?.addEventListener("click", () => adjustLobbyFeeByStep(10));
+  $("#reset-lobby-fee")?.addEventListener("click", () => saveLobbyFee({ resetToDefault: true }));
   $("#save-room-count")?.addEventListener("click", saveAdminRoomCount);
   $("#save-final-scores")?.addEventListener("click", saveFinalScores);
   $("#admin-result-date")?.addEventListener("change", handleAdminResultDateChange);
@@ -1760,6 +1844,25 @@ function populateLobbyFeeValues() {
   if (Array.from(select.options).some((option) => option.value === selected)) select.value = selected;
 }
 
+function lobbyFeeBadgeLabel(room) {
+  if (!room) return "";
+  if (Number(room.fee) === Number(room.baseFee)) return `default ${formatEntryFee(room.baseFee)}`;
+  if (Number(room.fee) === 0) return `FREE (₹0) · default ${formatEntryFee(room.baseFee)}`;
+  return `custom ${formatEntryFee(room.fee)} · default ${formatEntryFee(room.baseFee)}`;
+}
+
+function renderLobbyFeeOverridesSummary() {
+  const summaryEl = $("#lobby-fee-overrides-summary");
+  if (!summaryEl) return;
+  const customRooms = getRooms().filter((room) => Number(room.fee) !== Number(room.baseFee));
+  if (!customRooms.length) {
+    summaryEl.textContent = "All matches/lobbies are currently at their default entry fees.";
+    return;
+  }
+  const labels = customRooms.map((room) => `${room.id}: ${formatEntryFee(room.fee)} (default ${formatEntryFee(room.baseFee)})`);
+  summaryEl.textContent = `Modified matches (${customRooms.length}): ${labels.join(" · ")}. All other lobbies remain at their default entry fee.`;
+}
+
 function populateLobbyFeeRooms() {
   const mode = $("#lobby-fee-mode")?.value || "br";
   const brFormatWrap = $("#lobby-fee-br-format-wrap");
@@ -1779,7 +1882,7 @@ function populateLobbyFeeRooms() {
     .filter((room) => room.scheduleSlot === slot);
   const select = $("#lobby-fee-room");
   if (!select) return;
-  select.innerHTML = rooms.map((room) => `<option value="${escapeHtml(room.id)}">${escapeHtml(room.id)} · ${escapeHtml(room.title)} · current ${formatEntryFee(room.fee)}</option>`).join("");
+  select.innerHTML = rooms.map((room) => `<option value="${escapeHtml(room.id)}">${escapeHtml(room.id)} · ${escapeHtml(room.title)} · ${escapeHtml(lobbyFeeBadgeLabel(room))}</option>`).join("");
   if (rooms.some((room) => room.id === selectedId)) select.value = selectedId;
   else if (rooms.length) select.value = rooms[0].id;
   const saveButton = $("#save-lobby-fee");
@@ -1790,34 +1893,95 @@ function populateLobbyFeeRooms() {
 function syncLobbyFeeValue() {
   const room = getRoom($("#lobby-fee-room")?.value);
   const select = $("#lobby-fee-value");
+  const typeSelect = $("#lobby-fee-entry-type");
   const feedback = $("#lobby-fee-feedback");
   if (room && select) select.value = String(room.fee);
-  if (feedback) feedback.textContent = room
-    ? `${room.title} · current fee ${formatEntryFee(room.fee)}. The room reference stays the same when you change its fee.`
-    : "No lobby matches the selected mode, format, type and slot.";
+  if (room && typeSelect) {
+    if (Number(room.fee) === Number(room.baseFee)) typeSelect.value = "default";
+    else if (Number(room.fee) === 0) typeSelect.value = "free";
+    else typeSelect.value = "paid";
+  }
+  if (feedback) {
+    if (!room) {
+      feedback.textContent = "No lobby matches the selected mode, format, type and slot.";
+    } else {
+      const statusNote = Number(room.fee) === Number(room.baseFee)
+        ? `Using default fee (${formatEntryFee(room.baseFee)})`
+        : Number(room.fee) === 0
+          ? `Set to Free Entry (₹0) — default is ${formatEntryFee(room.baseFee)}`
+          : `Custom paid fee ${formatEntryFee(room.fee)} — default is ${formatEntryFee(room.baseFee)}`;
+      feedback.textContent = `${room.title} (${room.id}) · ${statusNote}. Capacity: ${room.capacity} ${entryLabel(room)}.`;
+    }
+  }
+  renderLobbyFeeOverridesSummary();
 }
 
-async function saveLobbyFee() {
+function handleLobbyFeeEntryTypeChange() {
   const room = getRoom($("#lobby-fee-room")?.value);
-  const fee = Number($("#lobby-fee-value")?.value);
-  if (!room || !isValidLobbyFee(fee)) return toast("Choose a lobby and a fee from Free to ₹110 in ₹10 steps.", true);
+  const typeSelect = $("#lobby-fee-entry-type");
+  const valueSelect = $("#lobby-fee-value");
+  if (!room || !typeSelect || !valueSelect) return;
+  if (typeSelect.value === "default") {
+    valueSelect.value = String(room.baseFee);
+  } else if (typeSelect.value === "free") {
+    valueSelect.value = "0";
+  } else if (typeSelect.value === "paid" && Number(valueSelect.value) === 0) {
+    valueSelect.value = String(room.baseFee || 20);
+  }
+}
+
+function handleLobbyFeeAmountChange() {
+  const room = getRoom($("#lobby-fee-room")?.value);
+  const typeSelect = $("#lobby-fee-entry-type");
+  const valueSelect = $("#lobby-fee-value");
+  if (!room || !typeSelect || !valueSelect) return;
+  const amount = Number(valueSelect.value);
+  if (amount === 0) typeSelect.value = "free";
+  else if (amount === Number(room.baseFee)) typeSelect.value = "default";
+  else typeSelect.value = "paid";
+}
+
+function adjustLobbyFeeByStep(delta) {
+  const room = getRoom($("#lobby-fee-room")?.value);
+  const valueSelect = $("#lobby-fee-value");
+  if (!room || !valueSelect) return;
+  const current = Number(valueSelect.value);
+  const next = Math.max(0, Math.min(110, (Number.isFinite(current) ? current : Number(room.fee)) + delta));
+  valueSelect.value = String(next);
+  handleLobbyFeeAmountChange();
+}
+
+async function saveLobbyFee({ feeOverride = null, resetToDefault = false } = {}) {
+  const room = getRoom($("#lobby-fee-room")?.value);
+  if (!room) return toast("Choose a lobby first.", true);
+  const entryType = $("#lobby-fee-entry-type")?.value || "paid";
+  const shouldReset = resetToDefault || entryType === "default";
+  const fee = feeOverride !== null
+    ? Number(feeOverride)
+    : shouldReset
+      ? Number(room.baseFee)
+      : entryType === "free"
+        ? 0
+        : Number($("#lobby-fee-value")?.value);
+  if (!isValidLobbyFee(fee)) return toast("Choose a lobby and a fee from Free to ₹110 in ₹10 steps.", true);
   if (!SERVER_AVAILABLE || !currentAdminCsrf) return toast("Sign in to the live server before changing lobby fees.", true);
   const button = $("#save-lobby-fee");
   if (button) button.disabled = true;
   try {
-    const result = await apiPost("/api/admin/lobby-fee", { roomId: room.id, fee });
+    const payload = shouldReset && feeOverride === null
+      ? { roomId: room.id, fee: Number(room.baseFee), reset: true }
+      : { roomId: room.id, fee };
+    const result = await apiPost("/api/admin/lobby-fee", payload);
     if (result.state) SERVER_STATE = { ...(SERVER_STATE || {}), ...result.state };
     ADMIN_SUMMARY = { ...(ADMIN_SUMMARY || {}), ...result };
     await refreshStateFromServer();
-    const mode = $("#admin-mode")?.value || "br";
-    populateFeeSelect($("#admin-fee"), $("#admin-fee")?.value || getFeeTiers(mode)[0], mode);
-    const shareMode = $("#room-share-mode")?.value || "br";
-    populateFeeSelect($("#room-share-fee"), $("#room-share-fee")?.value || getFeeTiers(shareMode)[0], shareMode);
     populateLobbyFeeRooms();
     updateAdminRoomChoices();
     updateRoomShareChoices();
     await renderAdminTables(ADMIN_SUMMARY);
-    showAdminConfirmation(`Entry fee saved: ${formatEntryFee(fee)}`);
+    showAdminConfirmation(shouldReset && feeOverride === null
+      ? `Reset ${room.id} to default fee (${formatEntryFee(room.baseFee)})`
+      : `Entry fee saved for ${room.id}: ${formatEntryFee(fee)}`);
   } catch (error) {
     toast(error.message || "Could not save this lobby fee.", true);
   } finally {
@@ -1827,7 +1991,6 @@ async function saveLobbyFee() {
 
 function updateAdminRoomChoices() {
   const mode = $("#admin-mode")?.value || "br";
-  const fee = Number($("#admin-fee")?.value || getFeeTiers(mode)[0]);
   const variantWrap = $("#admin-variant-wrap");
   const formatWrap = $("#admin-format-wrap");
   const csFormatWrap = $("#admin-cs-format-wrap");
@@ -1837,11 +2000,16 @@ function updateAdminRoomChoices() {
   if (variantWrap) variantWrap.classList.toggle("hidden", mode !== "cs");
   if (formatWrap) formatWrap.classList.toggle("hidden", mode !== "br");
   if (csFormatWrap) csFormatWrap.classList.toggle("hidden", mode !== "cs");
+  const activeFormat = mode === "cs" ? csFormat : format;
+  const activeVariant = mode === "cs" ? variant : undefined;
+  populateFeeSelect($("#admin-fee"), $("#admin-fee")?.value, mode, { format: activeFormat, variant: activeVariant });
+  const feeSelect = $("#admin-fee");
+  const fee = feeSelect?.value !== undefined && feeSelect?.value !== "" ? Number(feeSelect.value) : getFeeTiers(mode, { format: activeFormat, variant: activeVariant })[0];
   const rooms = getRooms({
     mode,
     fee,
-    variant: mode === "cs" ? variant : undefined,
-    format: mode === "cs" ? csFormat : format
+    variant: activeVariant,
+    format: activeFormat
   });
   const select = $("#admin-room");
   if (!select) return;
@@ -1883,11 +2051,9 @@ async function saveAdminRoomCount() {
 }
 
 function updateRoomShareChoices() {
-  populateFeeSelect($("#room-share-fee"), Number($("#room-share-fee")?.value || getFeeTiers("br")[0]), $("#room-share-mode")?.value || "br");
   populateFormatSelect($("#room-share-format"), $("#room-share-format")?.value || "solo");
   populateCSFormatSelect($("#room-share-cs-format"), $("#room-share-cs-format")?.value || "squad");
   const mode = $("#room-share-mode")?.value || "br";
-  const fee = Number($("#room-share-fee")?.value || getFeeTiers(mode)[0]);
   const formatWrap = $("#room-share-format-wrap");
   const csFormatWrap = $("#room-share-cs-format-wrap");
   const variantWrap = $("#room-share-variant-wrap");
@@ -1897,11 +2063,16 @@ function updateRoomShareChoices() {
   formatWrap?.classList.toggle("hidden", mode !== "br");
   csFormatWrap?.classList.toggle("hidden", mode !== "cs");
   variantWrap?.classList.toggle("hidden", mode !== "cs");
-  const rooms = getRooms({ mode, fee, format: mode === "br" ? format : csFormat, variant: mode === "cs" ? variant : undefined });
+  const activeFormat = mode === "br" ? format : csFormat;
+  const activeVariant = mode === "cs" ? variant : undefined;
+  populateFeeSelect($("#room-share-fee"), $("#room-share-fee")?.value, mode, { format: activeFormat, variant: activeVariant });
+  const feeSelect = $("#room-share-fee");
+  const fee = feeSelect?.value !== undefined && feeSelect?.value !== "" ? Number(feeSelect.value) : getFeeTiers(mode, { format: activeFormat, variant: activeVariant })[0];
+  const rooms = getRooms({ mode, fee, format: activeFormat, variant: activeVariant });
   const select = $("#room-share-room");
   if (!select) return;
   const previousRoom = select.value;
-  select.innerHTML = rooms.map((room) => `<option value="${escapeHtml(room.id)}">${escapeHtml(room.title)} (${getConfirmedTeams(room)}/${room.capacity} ${entryLabel(room)})</option>`).join("");
+  select.innerHTML = rooms.map((room) => `<option value="${escapeHtml(room.id)}">${escapeHtml(room.id)} · ${escapeHtml(room.title)} (${getConfirmedTeams(room)}/${room.capacity} ${entryLabel(room)})</option>`).join("");
   if (rooms.some((room) => room.id === previousRoom)) select.value = previousRoom;
   loadRoomDetailAdminFields();
 }
@@ -2094,14 +2265,16 @@ async function savePaymentSettings() {
   try {
     if (SERVER_AVAILABLE && currentAdminCsrf) {
       await apiPost("/api/admin/payment-settings", { settings });
+      savePaymentBackup(settings);
       await refreshStateFromServer();
       await renderAdminTables();
       $$('[data-registration-form]').forEach(renderPaymentInstructions);
-      showAdminConfirmation("Payment settings saved");
+      showAdminConfirmation("Payment settings saved in MongoDB (persists across redeployments)");
       return;
     }
     const state = loadState();
     state.paymentSettings = settings;
+    savePaymentBackup(settings);
     saveState(state);
     SERVER_STATE = state;
     $$('[data-registration-form]').forEach(renderPaymentInstructions);
@@ -2305,10 +2478,11 @@ function renderFinalScoreTable() {
     const csResult = resultSource.csResult || {};
     const resultControl = mode === "br" ? `<div class="br-score-editor">${[0, 1, 2].map((index) => {
       const match = brMatches[index] || {};
-      const positionOptions = [`<option value="">Place</option>`, ...Array.from({ length: 12 }, (_, posIndex) => {
+      const roomCap = Number(getRoom(reg.roomId)?.capacity || reg.slotCapacity || 12);
+      const positionOptions = [`<option value="">Place</option>`, ...Array.from({ length: roomCap }, (_, posIndex) => {
         const position = posIndex + 1;
         const selected = Number(match.position) === position ? "selected" : "";
-        return `<option value="${position}" ${selected}>#${position} · ${DATA.scoring.br.placement[position]} pts</option>`;
+        return `<option value="${position}" ${selected}>#${position} · ${DATA.scoring.br.placement[position] ?? 0} pts</option>`;
       })].join("");
       return `<fieldset class="br-match-input"><legend>Match ${index + 1}</legend><label>Kills<input class="score-input" type="number" min="0" max="99" step="1" inputmode="numeric" data-match-kills="${escapeHtml(reg.id)}" data-match-index="${index}" value="${match.kills ?? ""}" aria-label="Kills in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}" /></label><label>Placement<select data-match-position="${escapeHtml(reg.id)}" data-match-index="${index}" aria-label="Placement in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}">${positionOptions}</select></label></fieldset>`;
     }).join("")}</div>` : `<div class="cs-score-editor"><label>Match result<select data-cs-outcome="${escapeHtml(reg.id)}"><option value="" ${!csResult.outcome ? "selected" : ""}>Not entered</option><option value="Win" ${csResult.outcome === "Win" ? "selected" : ""}>Win · 3 points</option><option value="Loss" ${csResult.outcome === "Loss" ? "selected" : ""}>Loss · 0 points</option></select></label><label>Round difference<input class="score-input" type="number" min="-99" max="99" step="1" data-cs-round-diff="${escapeHtml(reg.id)}" value="${csResult.roundDiff ?? ""}" placeholder="e.g. 3 or -2" /></label></div>`;

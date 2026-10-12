@@ -76,7 +76,7 @@
 
       <article class="admin-box">
         <h2>Update room slots</h2>
-        <p>Set the number of confirmed entries in any selected lobby. Battle Royale capacity is 12 entries; each Clash Squad room holds exactly 2 sides of the selected size.</p>
+        <p>Set the number of confirmed entries in any selected lobby. Battle Royale capacity follows a 50-player custom room (Solo 50, Duo 25, Trio 16, Squad 12); each Clash Squad room holds exactly 2 sides of the selected size.</p>
         <div class="field-grid">
           <label>Mode<select id="admin-mode"><option value="br">Battle Royale</option><option value="cs">Clash Squad</option></select></label>
           <label>Fee<select id="admin-fee"></select></label>
@@ -91,7 +91,7 @@
 
       <article class="admin-box full" id="lobby-fee-controls">
         <h2>Set entry fee for each lobby</h2>
-        <p>Choose a specific BR or CS lobby and set its fee independently from <b>Free to ₹110</b> in ₹10 steps. BR Solo is charged per player; BR Duo/Trio/Squad per team; CS per registered side/team. Changes apply to new registrations only; submitted entries keep their recorded fee.</p>
+        <p>Every match/lobby remains at its default entry fee until you change it here for a specific lobby. Decide whether a specific match is <b>Default Fee</b>, <b>Free Entry (₹0)</b>, or <b>Paid (₹10–₹110 in ₹10 steps)</b>. BR Solo is charged per player; BR Duo/Trio/Squad per team; CS per registered side/team. Changes apply to new registrations only; submitted entries keep their recorded fee.</p>
         <div class="field-grid">
           <label>Mode<select id="lobby-fee-mode"><option value="br">Battle Royale</option><option value="cs">Clash Squad</option></select></label>
           <label id="lobby-fee-br-format-wrap">Battle Royale Format<select id="lobby-fee-br-format"></select></label>
@@ -99,10 +99,18 @@
           <label id="lobby-fee-variant-wrap" class="hidden">Clash Squad Type<select id="lobby-fee-variant"><option value="Normal">Normal</option><option value="One Tap">One Tap</option></select></label>
           <label>Time Slot<select id="lobby-fee-slot"><option value="slot1">Slot 1</option><option value="slot2">Slot 2</option><option value="slot3">Slot 3</option></select></label>
           <label>Specific lobby<select id="lobby-fee-room"></select></label>
+          <label>Match fee mode<select id="lobby-fee-entry-type"><option value="default">Default lobby fee</option><option value="free">Free entry (₹0)</option><option value="paid">Custom paid fee</option></select></label>
           <label>New entry fee<select id="lobby-fee-value"></select></label>
         </div>
-        <div class="admin-actions"><button class="btn small" id="save-lobby-fee" type="button">Save Lobby Entry Fee</button></div>
+        <div class="admin-actions">
+          <button class="btn small" id="save-lobby-fee" type="button">Save Lobby Entry Fee</button>
+          <button class="btn small ghost" id="make-lobby-free" type="button">Make Free Entry (₹0)</button>
+          <button class="btn small ghost" id="decrease-lobby-fee" type="button">Decrease (-₹10)</button>
+          <button class="btn small ghost" id="increase-lobby-fee" type="button">Increase (+₹10)</button>
+          <button class="btn small ghost" id="reset-lobby-fee" type="button">Reset to Default Fee</button>
+        </div>
         <p class="disclaimer" id="lobby-fee-feedback" role="status" aria-live="polite"></p>
+        <p class="disclaimer" id="lobby-fee-overrides-summary"></p>
       </article>
 
       <article class="admin-box">
@@ -129,7 +137,7 @@
 
       <article class="admin-box full">
         <h2>Payment instructions for players</h2>
-        <p>Upload an optional payment QR and/or set a UPI ID. Players can use the QR or generated UPI link. The UTR/reference remains required, and payment still needs manual verification before approval.</p>
+        <p>Upload an optional payment QR and/or set a UPI ID. Players can use the QR or generated UPI link. The UTR/reference remains required, and payment still needs manual verification before approval. Saved payment details are stored in MongoDB and persist automatically across Vercel redeployments.</p>
         <div class="field-grid">
           <label>Payee / account name<input id="payment-payee" maxlength="100" placeholder="Organizer / account name" /></label>
           <label>UPI ID<input id="payment-upi-id" maxlength="120" placeholder="name@bank" /></label>
@@ -138,6 +146,7 @@
         <label>Payment QR image<input id="payment-qr-file" type="file" accept="image/png,image/jpeg,image/webp" /></label>
         <div id="payment-qr-preview-wrap" class="qr-preview-wrap hidden"><img id="payment-qr-preview" alt="Payment QR preview" /><button class="btn small ghost" id="clear-payment-qr" type="button">Remove QR</button></div>
         <div class="admin-actions"><button class="btn small" id="save-payment-settings" type="button">Publish Payment Instructions</button></div>
+        <p class="disclaimer" id="payment-persistence-status" role="status" aria-live="polite">Saved in MongoDB database — your UPI ID, payee name, note, and QR code persist automatically across all Vercel redeployments.</p>
       </article>
 
       <article class="admin-box full">

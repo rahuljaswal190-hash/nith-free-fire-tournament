@@ -372,10 +372,15 @@ class TournamentApiTests(unittest.TestCase):
         before = self.get_state()["roomDetails"]["BR-SOLO-20-1"]
         self.assertNotIn("customRoomId", before)
         self.assertNotIn("roomQrDataUrl", before)
-        self.admin("/api/admin/room-count", {"roomId": "BR-SOLO-20-1", "count": 12})
+        self.admin("/api/admin/room-count", {"roomId": "BR-SOLO-20-1", "count": 50})
         after = self.get_state()["roomDetails"]["BR-SOLO-20-1"]
         self.assertEqual(after["customRoomId"], "998877")
         self.assertEqual(after["roomQrDataUrl"], PNG_DATA_URL)
+        self.assertEqual(server.room_capacity("BR-SOLO-20-1"), 50)
+        self.assertEqual(server.room_capacity("BR-DUO-20-1"), 25)
+        self.assertEqual(server.room_capacity("BR-TRIO-20-1"), 16)
+        self.assertEqual(server.room_capacity("BR-SQUAD-20-1"), 12)
+        self.assertEqual(server.room_capacity("CS-NM-50-1"), 2)
 
     def test_emoji_name_edits_and_registration_deletion(self):
         self.assertEqual(server.normalize_name("Team 👩‍🚀"), "Team 👩‍🚀")
@@ -492,6 +497,9 @@ class TournamentApiTests(unittest.TestCase):
         cs_saved = self.admin("/api/admin/lobby-fee", {"roomId": "CS-NM-50-1", "fee": 110})
         self.assertEqual(cs_saved["roomFees"]["CS-NM-50-1"], 110)
         self.assertEqual(server.room_metadata("CS-NM-50-1", server.load_state()["roomFees"])["fee"], 110)
+        reset_saved = self.admin("/api/admin/lobby-fee", {"roomId": "BR-SOLO-20-1", "reset": True})
+        self.assertNotIn("BR-SOLO-20-1", reset_saved["roomFees"])
+        self.assertEqual(server.room_metadata("BR-SOLO-20-1", server.load_state()["roomFees"])["fee"], 20)
 
     def test_lobby_fee_rejects_values_outside_10_rupee_steps_and_unknown_rooms(self):
         self.assertTrue(all(server.valid_lobby_fee(fee) for fee in range(0, 111, 10)))
