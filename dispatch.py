@@ -1,13 +1,19 @@
 """Single Vercel Python Function that dispatches the existing tournament API."""
+import os
 from pathlib import Path
 import sys
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+HERE = Path(__file__).resolve().parent
+PROJECT_ROOT = HERE if (HERE / "server.py").is_file() else HERE.parent
+for candidate in (str(PROJECT_ROOT), str(HERE)):
+    if candidate not in sys.path:
+        sys.path.insert(0, candidate)
 
 import server  # noqa: E402
+
+if not os.path.isdir(server.PUBLIC_DIR):
+    server.PUBLIC_DIR = str(PROJECT_ROOT)
 
 ROUTE_QUERY_KEY = "__nith_vercel_path"
 API_PATHS = frozenset({
