@@ -15,7 +15,7 @@ from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote_plus, unquote, urlparse
 
 try:
     from pymongo import MongoClient
@@ -42,6 +42,53 @@ class StateStoreUnavailable(RuntimeError):
     """Configured durable state storage could not be reached; do not use local fallback."""
 
 
+def normalize_mongodb_uri(raw_uri):
+    uri = str(raw_uri or "").strip()
+    if len(uri) >= 2 and uri[0] == uri[-1] and uri[0] in ('"', "'", "`"):
+        uri = uri[1:-1].strip()
+    if uri.upper().startswith("MONGODB_URI="):
+        uri = uri.split("=", 1)[1].strip()
+        if len(uri) >= 2 and uri[0] == uri[-1] and uri[0] in ('"', "'", "`"):
+            uri = uri[1:-1].strip()
+    for scheme in ("mongodb+srv://", "mongodb://"):
+        if uri.startswith(scheme):
+            remainder = uri[len(scheme):]
+            slash_idx = remainder.find("/")
+            if slash_idx == -1:
+                authority, tail = remainder, ""
+            else:
+                authority, tail = remainder[:slash_idx], remainder[slash_idx:]
+            if "@" in authority:
+                userinfo, hostpart = authority.rsplit("@", 1)
+                if ":" in userinfo:
+                    raw_user, raw_pass = userinfo.split(":", 1)
+                    if len(raw_user) >= 2 and raw_user.startswith("<") and raw_user.endswith(">"):
+                        raw_user = raw_user[1:-1]
+                    if raw_pass.lower() in ("<db_password>", "<password>", "db_password"):
+                        raise StateStoreUnavailable(
+                            "MONGODB_URI still has the <db_password> placeholder. Replace <db_password> in Vercel Environment Variables with your real MongoDB database password. No local fallback was used."
+                        )
+                    if len(raw_pass) >= 2 and raw_pass.startswith("<") and raw_pass.endswith(">"):
+                        raw_pass = raw_pass[1:-1]
+                    safe_user = quote_plus(unquote(raw_user))
+                    safe_pass = quote_plus(unquote(raw_pass))
+                    return f"{scheme}{safe_user}:{safe_pass}@{hostpart}{tail}"
+            return uri
+    return uri
+
+
+def _classify_mongo_exception(exc):
+    cls_name = type(exc).__name__
+    code = getattr(exc, "code", None)
+    if code in (18, 8000) or cls_name == "OperationFailure":
+        return "MongoDB authentication failed: wrong username or password in MONGODB_URI (check Database Access in MongoDB Atlas). No local fallback was used."
+    if cls_name in ("InvalidURI", "ConfigurationError"):
+        return "MONGODB_URI format is invalid in Vercel Environment Variables (check for <db_password> or special characters in password). No local fallback was used."
+    if cls_name in ("ServerSelectionTimeoutError", "NetworkTimeout", "AutoReconnect"):
+        return "MongoDB connection timed out: in MongoDB Atlas -> Network Access, add 0.0.0.0/0 (Allow Access from Anywhere). No local fallback was used."
+    return "Configured state storage is unavailable. No local fallback was used."
+
+
 def get_mongodb_collection():
     global _MONGO_CLIENT, _MONGO_COLLECTION
     if not MONGODB_URI:
@@ -50,11 +97,12 @@ def get_mongodb_collection():
         if _MONGO_COLLECTION is not None:
             return _MONGO_COLLECTION
         if MongoClient is None:
-            raise StateStoreUnavailable("MongoDB is configured but its driver is unavailable.")
+            raise StateStoreUnavailable("MongoDB is configured but its driver is unavailable. No local fallback was used.")
+        normalized_uri = normalize_mongodb_uri(MONGODB_URI)
         client = None
         try:
             client = MongoClient(
-                MONGODB_URI,
+                normalized_uri,
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=5000,
                 socketTimeoutMS=10000,
@@ -62,14 +110,16 @@ def get_mongodb_collection():
             )
             client.admin.command("ping")
             collection = client[MONGODB_DATABASE][MONGODB_COLLECTION_NAME]
-        except Exception:
+        except StateStoreUnavailable:
+            raise
+        except Exception as exc:
             if client is not None:
                 try:
                     client.close()
                 except Exception:
                     pass
-            # Never log or return the URI or driver exception, which may contain credentials.
-            raise StateStoreUnavailable("MongoDB state storage is unavailable; no local fallback was used.") from None
+            # Never log or return the URI or raw driver exception, which may contain credentials.
+            raise StateStoreUnavailable(_classify_mongo_exception(exc)) from None
         _MONGO_CLIENT = client
         _MONGO_COLLECTION = collection
         return _MONGO_COLLECTION
@@ -1218,8 +1268,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             try:
                 state = load_state()
-            except StateStoreUnavailable:
-                self.send_json({"ok": False, "error": "Configured state storage is unavailable. No local fallback was used."}, 503)
+            except StateStoreUnavailable as exc:
+                self.send_json({"ok": False, "error": str(exc) or "Configured state storage is unavailable. No local fallback was used."}, 503)
                 return
             self.send_json(public_state(state))
             return
@@ -1256,8 +1306,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._do_post_locked()
             with STATE_LOCK:
                 return self._do_post_locked()
-        except StateStoreUnavailable:
-            self.send_json({"ok": False, "error": "Configured state storage is unavailable. No local fallback was used."}, 503)
+        except StateStoreUnavailable as exc:
+            self.send_json({"ok": False, "error": str(exc) or "Configured state storage is unavailable. No local fallback was used."}, 503)
 
     def _do_post_locked(self):
         path = urlparse(self.path).path
