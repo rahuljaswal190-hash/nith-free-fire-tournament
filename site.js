@@ -4,6 +4,7 @@ let toastTimer;
 let lastSummary = "";
 let SERVER_AVAILABLE = false;
 let SERVER_STATE = null;
+let LAST_SERVER_ERROR = "";
 let currentAdminCsrf = "";
 let liveSyncTimer = null;
 let ADMIN_REGISTRATIONS = [];
@@ -79,9 +80,14 @@ function saveState(state) {
 async function refreshStateFromServer() {
   try {
     const response = await fetch(`/api/state?ts=${Date.now()}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(`State API ${response.status}`);
-    SERVER_STATE = await response.json();
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data || data.ok === false) {
+      LAST_SERVER_ERROR = data?.error || "";
+      throw new Error(LAST_SERVER_ERROR || `State API ${response.status}`);
+    }
+    SERVER_STATE = data;
     SERVER_AVAILABLE = true;
+    LAST_SERVER_ERROR = "";
     return true;
   } catch (error) {
     SERVER_AVAILABLE = false;
@@ -783,12 +789,15 @@ function setupCommonRegistration() {
 }
 
 async function submitRegistration(data) {
+  if (!SERVER_AVAILABLE && location.protocol !== "file:") {
+    await refreshStateFromServer();
+  }
   if (SERVER_AVAILABLE) {
     const result = await apiPost("/api/register", data);
     return { message: result.message || "Registration received on the live server.", registration: result.registration };
   }
   if (location.protocol !== "file:") {
-    throw new Error("The live registration server is unavailable. No registration was sent; please try again shortly.");
+    throw new Error(LAST_SERVER_ERROR || "The live registration server is unavailable. No registration was sent; please try again shortly.");
   }
   const state = loadState();
   const room = getRoom(data.roomId);
@@ -1207,12 +1216,16 @@ function setupDashboardPage() {
   unlock.dataset.bound = "true";
   const signIn = async () => {
     if (!SERVER_AVAILABLE) {
-      toast("The live server is unavailable. Admin access is disabled until it reconnects.", true);
-      return;
+      await refreshStateFromServer();
     }
     try {
       const result = await apiPost("/api/admin/login", { pin: pinInput?.value || "" });
       currentAdminCsrf = result.csrfToken || "";
+      const stateReady = await refreshStateFromServer();
+      if (!stateReady) {
+        currentAdminCsrf = "";
+        throw new Error(LAST_SERVER_ERROR || "Signed in, but live tournament storage could not be reached. Verify MONGODB_URI and MongoDB Atlas Network Access on Vercel.");
+      }
       if (pinInput) pinInput.value = "";
       loginBox?.classList.add("hidden");
       panel.classList.remove("hidden");
@@ -1220,7 +1233,10 @@ function setupDashboardPage() {
       toast("Dashboard unlocked.");
     } catch (error) {
       currentAdminCsrf = "";
-      toast(error.message || "Sign-in failed.", true);
+      const msg = error?.message && !/^Request failed \(404\)|Failed to fetch|NetworkError|Load failed/i.test(error.message)
+        ? error.message
+        : (LAST_SERVER_ERROR || "The live server is unavailable. Admin access is disabled until it reconnects.");
+      toast(msg, true);
     }
   };
   unlock.addEventListener("click", signIn);
@@ -1625,12 +1641,16 @@ function setupAdminPage() {
 
   const signIn = async () => {
     if (!SERVER_AVAILABLE) {
-      toast("The live server is unavailable. Admin access is disabled until it reconnects.", true);
-      return;
+      await refreshStateFromServer();
     }
     try {
       const result = await apiPost("/api/admin/login", { pin: pinInput?.value || "" });
       currentAdminCsrf = result.csrfToken || "";
+      const stateReady = await refreshStateFromServer();
+      if (!stateReady) {
+        currentAdminCsrf = "";
+        throw new Error(LAST_SERVER_ERROR || "Signed in, but live tournament storage could not be reached. Verify MONGODB_URI and MongoDB Atlas Network Access on Vercel.");
+      }
       if (pinInput) pinInput.value = "";
       loginBox?.classList.add("hidden");
       panel.classList.remove("hidden");
@@ -1638,7 +1658,10 @@ function setupAdminPage() {
       toast("Admin controls unlocked. Live server mode is active.");
     } catch (error) {
       currentAdminCsrf = "";
-      toast(error.message || "Sign-in failed.", true);
+      const msg = error?.message && !/^Request failed \(404\)|Failed to fetch|NetworkError|Load failed/i.test(error.message)
+        ? error.message
+        : (LAST_SERVER_ERROR || "The live server is unavailable. Admin access is disabled until it reconnects.");
+      toast(msg, true);
     }
   };
 

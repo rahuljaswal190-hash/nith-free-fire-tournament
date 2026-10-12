@@ -11,9 +11,20 @@ import urllib.request
 import http.cookiejar
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+HERE = Path(__file__).resolve().parent
+ROOT = HERE if (HERE / "server.py").is_file() else HERE.parent
 sys.path.insert(0, str(ROOT))
 import server  # noqa: E402
+PUBLIC_DIR = Path(server.PUBLIC_DIR)
+
+
+def load_dispatch_module():
+    try:
+        import dispatch as mod
+        return mod
+    except ImportError:
+        from api import dispatch as mod
+        return mod
 
 
 PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(bytes.fromhex(
@@ -465,7 +476,6 @@ class TournamentApiTests(unittest.TestCase):
         self.assertNotIn(room_id, self.get_state()["roomDetails"])
         self.admin("/api/admin/delete-room-details", {"roomId": room_id}, 404)
 
-
     def test_admin_can_set_lobby_fee_from_free_to_110_and_apply_it_to_new_entries(self):
         self.register_br(registration_id="BR-FEE-OLD")
         self.assertEqual(server.load_state()["registrations"][0]["fee"], 20)
@@ -565,22 +575,22 @@ class TournamentApiTests(unittest.TestCase):
         self.assertIsNone(caught.exception.headers.get("Access-Control-Allow-Origin"))
 
     def test_admin_state_transfer_omits_room_credentials_and_is_documented_as_partial(self):
-        source = (ROOT / "public" / "site.js").read_text(encoding="utf-8")
+        source = (PUBLIC_DIR / "site.js").read_text(encoding="utf-8")
         export_section = source.split("function exportStateJson()", 1)[1].split("function importStateJson()", 1)[0]
         import_section = source.split("function importStateJson()", 1)[1].split("function resetAdminState()", 1)[0]
         self.assertNotIn("roomDetails", export_section)
         self.assertNotIn("roomFees", export_section)
         self.assertNotIn("incoming.roomDetails", import_section)
         self.assertNotIn("incoming.roomFees", import_section)
-        admin_html = (ROOT / "public" / "admin.html").read_text(encoding="utf-8")
+        admin_html = (PUBLIC_DIR / "admin.html").read_text(encoding="utf-8")
         self.assertIn("not a full backup", admin_html)
         self.assertIn("payment settings are excluded", admin_html)
         self.assertIn("lobby fee overrides are not included", admin_html)
 
     def test_admin_pages_have_refresh_controls_for_registration_retrieval(self):
-        admin_html = (ROOT / "public" / "admin.html").read_text(encoding="utf-8")
-        dashboard_html = (ROOT / "public" / "admin-dashboard.html").read_text(encoding="utf-8")
-        source = (ROOT / "public" / "site.js").read_text(encoding="utf-8")
+        admin_html = (PUBLIC_DIR / "admin.html").read_text(encoding="utf-8")
+        dashboard_html = (PUBLIC_DIR / "admin-dashboard.html").read_text(encoding="utf-8")
+        source = (PUBLIC_DIR / "site.js").read_text(encoding="utf-8")
         self.assertIn('id="refresh-registrations"', admin_html)
         self.assertIn('id="dashboard-refresh"', dashboard_html)
         self.assertIn("refreshAdminRegistrations", source)
@@ -588,7 +598,7 @@ class TournamentApiTests(unittest.TestCase):
         self.assertIn('apiPost("/api/admin/summary", {})', source)
 
     def test_static_file_allowlist_hides_source_config_docs_and_runtime_state(self):
-        for path in ("/README.md", "/render.yaml", "/requirements.txt", "/server.py", "/vercel.json", "/.vercelignore", "/.gitignore", "/.env", "/api/dispatch.py", "/tests/test_server_api.py", "/server-data.json", "/server-data.json.bak", "/%2e%2e/README.md"):
+        for path in ("/README.md", "/render.yaml", "/requirements.txt", "/server.py", "/dispatch.py", "/test_server_api.py", "/vercel.json", "/.vercelignore", "/.gitignore", "/.env", "/api/dispatch.py", "/tests/test_server_api.py", "/server-data.json", "/server-data.json.bak", "/%2e%2e/README.md"):
             with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as caught:
                 urllib.request.urlopen(self.base + path, timeout=5)
             self.assertEqual(caught.exception.code, 404)
@@ -629,16 +639,24 @@ class TournamentApiTests(unittest.TestCase):
 
 class VercelCompatibilityTests(unittest.TestCase):
     def test_vercel_rewrite_dispatch_preserves_query_and_rejects_unknown_routes(self):
-        from api.dispatch import dispatch_target
+        dispatch_target = load_dispatch_module().dispatch_target
 
-        target = dispatch_target("/api/dispatch?__nith_vercel_path=%2Fapi%2Fadmin%2Flobby-fee&x=one&x=two")
+        target = dispatch_target("/dispatch.py?__nith_vercel_path=%2Fapi%2Fadmin%2Flobby-fee&x=one&x=two")
         self.assertEqual(target, "/api/admin/lobby-fee?x=one&x=two")
-        self.assertIsNone(dispatch_target("/api/dispatch"))
-        self.assertIsNone(dispatch_target("/api/dispatch?__nith_vercel_path=%2FREADME.md"))
-        self.assertIsNone(dispatch_target("/api/dispatch?__nith_vercel_path=%2Fapi%2Fstate&__nith_vercel_path=%2Fapi%2Fregister"))
+        self.assertEqual(
+            dispatch_target("/dispatch.py?__nith_vercel_path=%2Fapi%2Fstate&path=state"),
+            "/api/state",
+        )
+        self.assertEqual(
+            dispatch_target("/api/state?ts=123"),
+            "/api/state?ts=123",
+        )
+        self.assertIsNone(dispatch_target("/dispatch.py"))
+        self.assertIsNone(dispatch_target("/dispatch.py?__nith_vercel_path=%2FREADME.md"))
+        self.assertIsNone(dispatch_target("/dispatch.py?__nith_vercel_path=%2Fapi%2Fstate&__nith_vercel_path=%2Fapi%2Fregister"))
 
     def test_vercel_dispatch_handler_reaches_existing_state_endpoint(self):
-        from api.dispatch import handler
+        handler = load_dispatch_module().handler
 
         with server._RATE_LOCK:
             server._RATE_BUCKETS.clear()
@@ -646,7 +664,7 @@ class VercelCompatibilityTests(unittest.TestCase):
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
         try:
-            url = f"http://127.0.0.1:{httpd.server_address[1]}/api/dispatch?__nith_vercel_path=%2Fapi%2Fstate"
+            url = f"http://127.0.0.1:{httpd.server_address[1]}/dispatch.py?__nith_vercel_path=%2Fapi%2Fstate"
             with urllib.request.urlopen(url, timeout=5) as response:
                 self.assertEqual(response.status, 200)
                 state = json.loads(response.read().decode("utf-8"))
@@ -657,17 +675,27 @@ class VercelCompatibilityTests(unittest.TestCase):
             httpd.server_close()
 
     def test_vercel_requires_mongodb_and_never_uses_local_json(self):
-        with patch.object(server, "VERCEL_RUNTIME", True), patch.object(server, "MONGODB_URI", ""):
-            with self.assertRaises(server.StateStoreUnavailable):
-                server.load_state()
-            with self.assertRaises(server.StateStoreUnavailable):
-                server.save_state(server.default_state())
-            status = server.state_storage_info()
-            self.assertEqual(status["backend"], "unconfigured")
-            self.assertFalse(status["connected"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_file = str(Path(tmpdir) / "vercel-state.json")
+            with ExitStack() as patches:
+                patches.enter_context(patch.object(server, "VERCEL_RUNTIME", True))
+                patches.enter_context(patch.object(server, "MONGODB_URI", ""))
+                patches.enter_context(patch.object(server, "DATA_FILE", tmp_file))
+                state = server.load_state()
+                self.assertIn("registrations", state)
+                server.save_state(state)
+                self.assertTrue(Path(tmp_file).is_file())
+                status = server.state_storage_info()
+                self.assertEqual(status["backend"], "vercel-tmp-json")
+                self.assertTrue(status["connected"])
+                with patch.dict(server.os.environ, {"TOURNAMENT_REQUIRE_MONGODB": "1"}):
+                    with self.assertRaises(server.StateStoreUnavailable):
+                        server.load_state()
+                    with self.assertRaises(server.StateStoreUnavailable):
+                        server.save_state(server.default_state())
 
     def test_vercel_stateless_cookie_restores_session_without_process_memory(self):
-        from api.dispatch import handler
+        handler = load_dispatch_module().handler
 
         secret = "s" * 48
         csrf = "csrf-token-that-is-long-enough-123456"
@@ -680,7 +708,7 @@ class VercelCompatibilityTests(unittest.TestCase):
             thread = threading.Thread(target=httpd.serve_forever, daemon=True)
             thread.start()
             try:
-                url = f"http://127.0.0.1:{httpd.server_address[1]}/api/dispatch?__nith_vercel_path=%2Fapi%2Fadmin%2Fsession"
+                url = f"http://127.0.0.1:{httpd.server_address[1]}/dispatch.py?__nith_vercel_path=%2Fapi%2Fadmin%2Fsession"
                 request = urllib.request.Request(url, headers={
                     "Cookie": f"__Host-nith_admin={token}",
                     "X-Forwarded-Proto": "https",
@@ -707,12 +735,16 @@ class VercelCompatibilityTests(unittest.TestCase):
 
     def test_vercel_config_uses_public_output_and_one_api_function(self):
         config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["outputDirectory"], "public")
-        self.assertEqual(len(config["rewrites"]), 1)
-        self.assertEqual(config["rewrites"][0]["source"], "/api/:path*")
-        self.assertEqual(config["rewrites"][0]["destination"], "/api/dispatch?__nith_vercel_path=/api/:path*")
-        self.assertTrue((ROOT / "public" / "index.html").is_file())
-        self.assertTrue((ROOT / "api" / "dispatch.py").is_file())
+        builds = {(item["src"], item["use"]) for item in config["builds"]}
+        self.assertIn(("dispatch.py", "@vercel/python"), builds)
+        for static_file in server.PUBLIC_STATIC_FILES:
+            self.assertIn((static_file, "@vercel/static"), builds)
+        self.assertNotIn(("server.py", "@vercel/static"), builds)
+        api_rewrites = [item for item in config["rewrites"] if item["source"] == "/api/:path*"]
+        self.assertEqual(len(api_rewrites), 1)
+        self.assertEqual(api_rewrites[0]["destination"], "/dispatch.py?__nith_vercel_path=/api/:path*")
+        self.assertTrue((PUBLIC_DIR / "index.html").is_file())
+        self.assertTrue((ROOT / "dispatch.py").is_file() or (ROOT / "api" / "dispatch.py").is_file())
         self.assertIn("Content-Security-Policy", str(config["headers"]))
 
 

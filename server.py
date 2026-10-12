@@ -73,6 +73,8 @@ def get_mongodb_collection():
         _MONGO_CLIENT = client
         _MONGO_COLLECTION = collection
         return _MONGO_COLLECTION
+
+
 ADMIN_PIN = os.environ.get("TOURNAMENT_ADMIN_PIN", "").strip()
 SESSION_TTL_SECONDS = 8 * 60 * 60
 SESSION_SECRET_MIN_BYTES = 32
@@ -118,8 +120,18 @@ def verify_admin_pin(candidate, configured_pin):
         return False
 
 
+def effective_session_secret(secret=None):
+    if secret is not None:
+        return secret
+    if TOURNAMENT_SESSION_SECRET:
+        return TOURNAMENT_SESSION_SECRET
+    if ADMIN_PIN:
+        return hashlib.sha256(f"nith-vercel-session-v1:{ADMIN_PIN}".encode("utf-8")).hexdigest()
+    return ""
+
+
 def session_secret_is_valid(secret=None):
-    value = TOURNAMENT_SESSION_SECRET if secret is None else secret
+    value = effective_session_secret(secret)
     return isinstance(value, str) and len(value.encode("utf-8")) >= SESSION_SECRET_MIN_BYTES
 
 
@@ -134,7 +146,7 @@ def _urlsafe_b64decode(value):
 
 
 def create_stateless_admin_session(csrf_token, now=None, secret=None):
-    signing_secret = TOURNAMENT_SESSION_SECRET if secret is None else secret
+    signing_secret = effective_session_secret(secret)
     if not session_secret_is_valid(signing_secret):
         raise ValueError("TOURNAMENT_SESSION_SECRET must contain at least 32 characters.")
     issued = int(time.time() if now is None else now)
@@ -151,7 +163,7 @@ def create_stateless_admin_session(csrf_token, now=None, secret=None):
 
 
 def decode_stateless_admin_session(token, now=None, secret=None):
-    signing_secret = TOURNAMENT_SESSION_SECRET if secret is None else secret
+    signing_secret = effective_session_secret(secret)
     if not session_secret_is_valid(signing_secret) or not isinstance(token, str) or len(token) > 2048:
         return None
     try:
@@ -305,8 +317,8 @@ def valid_image_data_url(value):
 
 
 def _require_vercel_state_store():
-    if VERCEL_RUNTIME and not MONGODB_URI:
-        raise StateStoreUnavailable("MongoDB is required on Vercel because function filesystems are not durable.")
+    if VERCEL_RUNTIME and not MONGODB_URI and os.environ.get("TOURNAMENT_REQUIRE_MONGODB", "").strip() == "1":
+        raise StateStoreUnavailable("MongoDB is required on Vercel when TOURNAMENT_REQUIRE_MONGODB=1 is set.")
 
 
 def load_state():
@@ -320,7 +332,7 @@ def _load_local_state_locked():
     if not os.path.exists(DATA_FILE):
         legacy_file = os.path.join(ROOT, "server-data.json")
         source_file = backup_file if os.path.exists(backup_file) else legacy_file
-        if os.path.exists(source_file) and os.path.abspath(source_file) != os.path.abspath(DATA_FILE):
+        if not VERCEL_RUNTIME and os.path.exists(source_file) and os.path.abspath(source_file) != os.path.abspath(DATA_FILE):
             os.makedirs(os.path.dirname(os.path.abspath(DATA_FILE)), mode=0o700, exist_ok=True)
             migrated_tmp = DATA_FILE + ".migrate.tmp"
             shutil.copy2(source_file, migrated_tmp)
@@ -502,14 +514,6 @@ def data_storage_is_mounted():
 
 
 def state_storage_info():
-    if VERCEL_RUNTIME and not MONGODB_URI:
-        return {
-            "backend": "unconfigured",
-            "connected": False,
-            "path": "Set MONGODB_URI in Vercel Environment Variables",
-            "configuredDirectory": False,
-            "mounted": False,
-        }
     if MONGODB_URI:
         return {
             "backend": "mongodb",
@@ -519,7 +523,7 @@ def state_storage_info():
             "mounted": False,
         }
     return {
-        "backend": "json",
+        "backend": "vercel-tmp-json" if VERCEL_RUNTIME else "json",
         "connected": True,
         "path": DATA_FILE,
         "configuredDirectory": bool(os.environ.get("TOURNAMENT_DATA_DIR") or os.environ.get("TOURNAMENT_DATA_FILE")),
@@ -891,7 +895,6 @@ def normalize_user_text(value, limit=500, preserve_lines=False):
     else:
         cleaned = " ".join(printable.split())
     return cleaned[:limit]
-
 
 
 def normalize_name(value, limit=80):
@@ -1276,9 +1279,6 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/admin/login":
             if not ADMIN_PIN:
                 self.send_json({"ok": False, "error": "Admin sign-in is not configured. Set TOURNAMENT_ADMIN_PIN in the host environment."}, 503)
-                return
-            if VERCEL_RUNTIME and not MONGODB_URI:
-                self.send_json({"ok": False, "error": "Persistent storage is not configured. Set MONGODB_URI in Vercel Environment Variables."}, 503)
                 return
             pin = payload.get("pin")
             if not verify_admin_pin(pin, ADMIN_PIN):

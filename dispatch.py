@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 import sys
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE if (HERE / "server.py").is_file() else HERE.parent
@@ -40,18 +40,31 @@ API_PATHS = frozenset({
 
 
 def dispatch_target(request_target):
-    """Recover the original API path from Vercel's internal rewrite query."""
+    """Recover the original API path from Vercel's internal rewrite query or direct API path."""
     try:
         parsed = urlsplit(str(request_target or ""))
         query = parse_qsl(parsed.query, keep_blank_values=True, max_num_fields=256)
     except (ValueError, TypeError):
         return None
-    route_values = [value for key, value in query if key == ROUTE_QUERY_KEY]
-    if len(route_values) != 1 or route_values[0] not in API_PATHS:
+    route_values = [unquote(value) for key, value in query if key == ROUTE_QUERY_KEY]
+    if len(route_values) > 1:
         return None
-    remaining = [(key, value) for key, value in query if key != ROUTE_QUERY_KEY]
-    clean_query = urlencode(remaining, doseq=True)
-    return urlunsplit(("", "", route_values[0], clean_query, ""))
+    if len(route_values) == 1:
+        candidate = route_values[0]
+        if candidate not in API_PATHS:
+            return None
+        subpath = candidate[len("/api/"):]
+        remaining = [
+            (key, value)
+            for key, value in query
+            if key != ROUTE_QUERY_KEY and not (key == "path" and value == subpath)
+        ]
+        clean_query = urlencode(remaining, doseq=True)
+        return urlunsplit(("", "", candidate, clean_query, ""))
+    if parsed.path in API_PATHS:
+        clean_query = urlencode(query, doseq=True)
+        return urlunsplit(("", "", parsed.path, clean_query, ""))
+    return None
 
 
 class handler(server.Handler):
