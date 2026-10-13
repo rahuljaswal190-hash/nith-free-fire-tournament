@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /admin.html
+Disallow: /admin-dashboard.html
+Disallow: /api/
+
+Sitemap: https://nith-free-fire-tournament.vercel.app/sitemap.xml

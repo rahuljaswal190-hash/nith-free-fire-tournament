@@ -148,6 +148,7 @@ PUBLIC_STATIC_FILES = frozenset({
     "index.html", "admin.html", "admin-dashboard.html", "battle-royale.html",
     "clash-squad.html", "leaderboard.html", "room-details.html", "rules.html",
     "schedule-results.html", "status-check.html", "data.js", "site.js", "styles.css",
+    "google60bd929192d8a343.html", "robots.txt", "sitemap.xml",
 })
 DEFAULT_SCHEDULE_SETTINGS = {
     "br": {"startTime": "21:00", "durationHours": 1, "gapHours": 0},

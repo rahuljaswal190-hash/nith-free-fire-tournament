@@ -14,7 +14,10 @@
     { "src": "status-check.html", "use": "@vercel/static" },
     { "src": "data.js", "use": "@vercel/static" },
     { "src": "site.js", "use": "@vercel/static" },
-    { "src": "styles.css", "use": "@vercel/static" }
+    { "src": "styles.css", "use": "@vercel/static" },
+    { "src": "google60bd929192d8a343.html", "use": "@vercel/static" },
+    { "src": "robots.txt", "use": "@vercel/static" },
+    { "src": "sitemap.xml", "use": "@vercel/static" }
   ],
   "rewrites": [
     {
