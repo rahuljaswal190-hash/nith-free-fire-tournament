@@ -1309,7 +1309,9 @@ async function renderDashboardData() {
   const table = $("#dashboard-registrations");
   if (table) {
     const regs = summary.registrations || [];
-    table.innerHTML = regs.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Slot</th><th>ID</th><th>Mode</th><th>Format</th><th>Match time</th><th>Room</th><th>Entry/Team</th><th>IGL/Player</th><th>Player details</th><th>WhatsApp</th><th>Fee</th><th>Payment</th></tr></thead><tbody>${regs.map((r) => `<tr><td>${registrationStatusBadge(r.status)}</td><td>${slotLabel(r)}</td><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(registrationFormatLabel(r) || r.variant || "-")}</td><td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.iglName || r.captainName)}</td><td>${playerListHtml(r)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatEntryFee(r.fee)}</td><td>${escapeHtml(r.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><h3>No registrations yet</h3><p>Registrations will appear live here.</p></div>`;
+    ADMIN_REGISTRATIONS = regs;
+    table.innerHTML = regs.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Slot (Admin Control)</th><th>ID</th><th>Mode</th><th>Format</th><th>Match time</th><th>Room</th><th>Entry/Team</th><th>IGL/Player</th><th>Player details</th><th>WhatsApp</th><th>Fee</th><th>Payment</th></tr></thead><tbody>${regs.map((r) => `<tr><td>${registrationStatusBadge(r.status)}</td><td>${adminSlotControlHtml(r, regs)}</td><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(registrationFormatLabel(r) || r.variant || "-")}</td><td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.iglName || r.captainName)}</td><td>${playerListHtml(r)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatEntryFee(r.fee)}</td><td>${escapeHtml(r.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><h3>No registrations yet</h3><p>Registrations will appear live here.</p></div>`;
+    bindAdminSlotSelects(table);
   }
 }
 
@@ -1332,8 +1334,92 @@ async function refreshDashboardRegistrations() {
 
 function slotLabel(reg) {
   if (!reg || !reg.slotNumber) return "-";
-  const roomCapacity = getRoom(reg.roomId)?.capacity || (String(reg.roomId || "").startsWith("CS-") ? 2 : 12);
+  const roomCapacity = getRoom(reg.roomId)?.capacity || reg.slotCapacity || (String(reg.roomId || "").startsWith("CS-") ? 2 : 12);
   return `#${escapeHtml(reg.slotNumber)}/${escapeHtml(roomCapacity)}`;
+}
+
+function adminSlotControlHtml(reg, allRegistrations = ADMIN_REGISTRATIONS) {
+  if (!reg) return "-";
+  const room = getRoom(reg.roomId);
+  const capacity = Number(room?.capacity || reg.slotCapacity || (String(reg.roomId || "").startsWith("CS-") ? 2 : 12));
+  const currentSlot = Number(reg.slotNumber || 1);
+  const options = Array.from({ length: capacity }, (_, index) => {
+    const slot = index + 1;
+    const occupant = (allRegistrations || []).find((item) =>
+      String(item.id) !== String(reg.id)
+      && String(item.roomId) === String(reg.roomId)
+      && String(item.status || "Pending").toLowerCase() !== "rejected"
+      && Number(item.slotNumber) === slot
+    );
+    const suffix = slot === currentSlot ? " (Current)" : occupant ? ` (Swap: ${occupant.teamName || "Team"})` : " (Open)";
+    return `<option value="${slot}" ${slot === currentSlot ? "selected" : ""}>#${slot}/${capacity}${escapeHtml(suffix)}</option>`;
+  }).join("");
+  return `<div class="admin-slot-cell"><select class="slot-select" data-reg-slot-select="${escapeHtml(reg.id)}" aria-label="Assign slot for ${escapeHtml(reg.teamName || reg.id)}">${options}</select><br><small>${escapeHtml(reg.roomId || "")}</small></div>`;
+}
+
+function bindAdminSlotSelects(scope = document) {
+  $$("[data-reg-slot-select]", scope).forEach((select) => {
+    if (select.dataset.bound === "true") return;
+    select.dataset.bound = "true";
+    select.addEventListener("change", () => {
+      const regId = select.dataset.regSlotSelect;
+      const newSlot = Number(select.value);
+      assignRegistrationSlot(regId, newSlot);
+    });
+  });
+}
+
+async function assignRegistrationSlot(registrationId, slotNumber, roomId = undefined) {
+  if (!registrationId || !Number.isInteger(Number(slotNumber))) return;
+  try {
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      const payload = { registrationId, slotNumber: Number(slotNumber) };
+      if (roomId) payload.roomId = roomId;
+      const result = await apiPost("/api/admin/assign-slot", payload);
+      await refreshStateFromServer();
+      if (document.body?.dataset?.page === "dashboard") {
+        await renderDashboardData();
+      } else {
+        await renderAdminTables();
+      }
+      renderPage();
+      showAdminConfirmation(result.message || `Slot updated to #${slotNumber}`);
+      return;
+    }
+    const state = loadState();
+    const reg = (state.registrations || []).find((item) => String(item.id) === String(registrationId));
+    if (!reg) throw new Error("Registration not found on this device.");
+    const targetRoomId = roomId || reg.roomId;
+    const room = getRoom(targetRoomId);
+    const capacity = Number(room?.capacity || 12);
+    const desired = Number(slotNumber);
+    if (desired < 1 || desired > capacity) throw new Error(`Choose a slot from 1 to ${capacity}.`);
+    const occupant = (state.registrations || []).find((item) =>
+      String(item.id) !== String(registrationId)
+      && String(item.roomId) === String(targetRoomId)
+      && String(item.status || "Pending").toLowerCase() !== "rejected"
+      && Number(item.slotNumber) === desired
+    );
+    if (occupant && String(reg.roomId) === String(targetRoomId) && reg.slotNumber) {
+      occupant.slotNumber = reg.slotNumber;
+      occupant.slotCapacity = capacity;
+    }
+    reg.roomId = targetRoomId;
+    if (room) reg.roomTitle = room.title;
+    reg.slotNumber = desired;
+    reg.slotCapacity = capacity;
+    saveState(state);
+    await renderAdminTables();
+    renderPage();
+    showAdminConfirmation(`Slot updated to #${desired}/${capacity}`);
+  } catch (error) {
+    toast(error.message || "Could not change slot number.", true);
+    if (document.body?.dataset?.page === "dashboard") {
+      renderDashboardData().catch(() => {});
+    } else {
+      renderAdminTables().catch(() => {});
+    }
+  }
 }
 
 function setupStatusPage() {
@@ -1648,9 +1734,10 @@ function renderAdminCalendar(registrations = []) {
       ? `<p><b>Registrations:</b> ${selectedRows.length} submitted on this date.</p>`
       : `<p class="calendar-result-empty"><b>Registrations:</b> No registrations were received on this date.</p>`;
     const table = selectedRows.length
-      ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Submitted time (IST)</th><th>Slot</th><th>Mode / format</th><th>Entry / team</th><th>Roster</th><th>Room</th><th>Contact</th><th>Payment ref</th></tr></thead><tbody>${selectedRows.map((reg) => `<tr><td>${registrationStatusBadge(reg.status)}</td><td>${escapeHtml(registrationTimeLabel(reg))}</td><td>${slotLabel(reg)}</td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(registrationFormatLabel(reg) || reg.variant || "-")}</td><td>${escapeHtml(reg.teamName || "-")}</td><td>${playerListHtml(reg)}</td><td>${escapeHtml(reg.roomId || "-")}</td><td>${escapeHtml(reg.whatsapp || "-")}</td><td>${escapeHtml(reg.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Submitted time (IST)</th><th>Slot (Admin Control)</th><th>Mode / format</th><th>Entry / team</th><th>Roster</th><th>Room</th><th>Contact</th><th>Payment ref</th></tr></thead><tbody>${selectedRows.map((reg) => `<tr><td>${registrationStatusBadge(reg.status)}</td><td>${escapeHtml(registrationTimeLabel(reg))}</td><td>${adminSlotControlHtml(reg, registrations)}</td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(registrationFormatLabel(reg) || reg.variant || "-")}</td><td>${escapeHtml(reg.teamName || "-")}</td><td>${playerListHtml(reg)}</td><td>${escapeHtml(reg.roomId || "-")}</td><td>${escapeHtml(reg.whatsapp || "-")}</td><td>${escapeHtml(reg.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>`
       : `<div class="empty-state compact-empty"><h3>No registrations for this date</h3><p>Entries submitted on this day will appear here.</p></div>`;
-    dayDetails.innerHTML = `<h3>${escapeHtml(dateTitle)}</h3><div class="calendar-date-status" role="status">${registrationsStatus}${resultsStatus}<p class="disclaimer">The match date field below is set to ${escapeHtml(dateTitle)}.</p></div>${table}`;
+    dayDetails.innerHTML = `<h3>${escapeHtml(dateTitle)}</h3><div class="calendar-date-status" role="status">${registrationsStatus}${resultsStatus}<p class="disclaimer">The match date field below is set to ${escapeHtml(dateTitle)}. Use any row's Slot dropdown to assign or swap slots immediately.</p></div>${table}`;
+    bindAdminSlotSelects(dayDetails);
   }
 }
 function updatePaymentPersistenceStatus(payment = {}, storageInfo = null) {
@@ -2327,14 +2414,14 @@ async function renderAdminTables(prefetchedSummary = null) {
     if (!state.registrations.length) {
       regs.innerHTML = `<div class="empty-state"><h3>No registrations yet</h3><p>Live registrations will appear here after players submit forms.</p></div>`;
     } else {
-      regs.innerHTML = `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Slot</th><th>Actions</th><th>ID</th><th>Mode</th><th>Format/Type</th><th>Match time</th><th>Room</th><th>Team/Entry</th><th>IGL/Player</th><th>Players</th><th>WhatsApp</th><th>Fee</th><th>Payment Ref</th><th>Time</th></tr></thead><tbody>${state.registrations.map((r) => `
+      regs.innerHTML = `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Slot (Admin Control)</th><th>Actions</th><th>ID</th><th>Mode</th><th>Format/Type</th><th>Match time</th><th>Room</th><th>Team/Entry</th><th>IGL/Player</th><th>Players</th><th>WhatsApp</th><th>Fee</th><th>Payment Ref</th><th>Time</th></tr></thead><tbody>${state.registrations.map((r) => `
         <tr>
           <td>${registrationStatusBadge(r.status)}</td>
-          <td>${slotLabel(r)}</td>
+          <td>${adminSlotControlHtml(r, state.registrations)}</td>
           <td class="admin-row-actions">
             <button class="btn small" type="button" data-reg-action="Approved" data-reg-id="${escapeHtml(r.id)}">Approve</button>
             <button class="btn small ghost danger" type="button" data-reg-action="Rejected" data-reg-id="${escapeHtml(r.id)}">Reject</button>
-            <button class="btn small ghost" type="button" data-reg-edit="${escapeHtml(r.id)}">Edit names</button>
+            <button class="btn small ghost" type="button" data-reg-edit="${escapeHtml(r.id)}">Edit slot / names</button>
             <button class="btn small ghost danger" type="button" data-reg-delete="${escapeHtml(r.id)}">Remove</button>
           </td>
           <td>${escapeHtml(r.id)}</td>
@@ -2350,6 +2437,7 @@ async function renderAdminTables(prefetchedSummary = null) {
           <td>${escapeHtml(r.paymentRef || "-")}</td>
           <td>${escapeHtml(r.submittedAtDisplay || "-")}</td>
         </tr>`).join("")}</tbody></table></div>`;
+      bindAdminSlotSelects(regs);
       $$('[data-reg-action]', regs).forEach((button) => {
         button.addEventListener("click", () => updateRegistrationStatus(button.dataset.regId, button.dataset.regAction));
       });
@@ -2362,13 +2450,47 @@ async function renderAdminTables(prefetchedSummary = null) {
   renderLeaderboards("#admin-cs-preview", "cs");
 }
 
+function populateEditModalSlotOptions(reg, selectedRoomId, preferredSlot) {
+  const slotSelect = $("#edit-slot-number");
+  if (!slotSelect) return;
+  const room = getRoom(selectedRoomId || reg?.roomId);
+  const capacity = Number(room?.capacity || reg?.slotCapacity || 12);
+  const activeSlot = Number(preferredSlot || (String(selectedRoomId) === String(reg?.roomId) ? reg?.slotNumber : 1) || 1);
+  slotSelect.innerHTML = Array.from({ length: capacity }, (_, index) => {
+    const slot = index + 1;
+    const occupant = (ADMIN_REGISTRATIONS || []).find((item) =>
+      String(item.id) !== String(reg?.id)
+      && String(item.roomId) === String(selectedRoomId)
+      && String(item.status || "Pending").toLowerCase() !== "rejected"
+      && Number(item.slotNumber) === slot
+    );
+    const note = (String(selectedRoomId) === String(reg?.roomId) && Number(reg?.slotNumber) === slot)
+      ? " (Current)"
+      : occupant
+        ? ` (Swap with ${occupant.teamName || "Team"})`
+        : " (Open)";
+    return `<option value="${slot}" ${slot === activeSlot ? "selected" : ""}>Slot #${slot}/${capacity}${escapeHtml(note)}</option>`;
+  }).join("");
+}
+
 function openRegistrationEditor(registrationId) {
   const reg = ADMIN_REGISTRATIONS.find((item) => String(item.id) === String(registrationId));
   if (!reg) return toast("Registration not found.", true);
   EDITING_REGISTRATION_ID = String(reg.id);
   const teamField = $("#edit-team-name");
+  const roomSelect = $("#edit-room-id");
   const list = $("#edit-player-list");
   if (teamField) teamField.value = reg.teamName || "";
+  if (roomSelect) {
+    const regMode = reg.mode || (String(reg.roomId || "").startsWith("CS-") ? "cs" : "br");
+    const candidateRooms = getRooms({ mode: regMode });
+    roomSelect.innerHTML = candidateRooms.map((room) => {
+      const window = roomScheduleWindow(room);
+      return `<option value="${escapeHtml(room.id)}" ${room.id === reg.roomId ? "selected" : ""}>${escapeHtml(room.id)} · ${escapeHtml(room.title)} (${escapeHtml(window?.label || "Slot")} · ${formatEntryFee(room.fee)})</option>`;
+    }).join("");
+    roomSelect.onchange = () => populateEditModalSlotOptions(reg, roomSelect.value);
+  }
+  populateEditModalSlotOptions(reg, reg.roomId, reg.slotNumber);
   if (list) {
     const players = Array.isArray(reg.players) && reg.players.length ? reg.players : [{ ign: reg.iglName || reg.captainName || "", uid: reg.iglUid || "" }];
     list.innerHTML = players.slice(0, 4).map((player, index) => `
@@ -2391,6 +2513,8 @@ async function saveRegistrationEdits(event) {
   if (!reg) return toast("Registration not found.", true);
   const teamName = clean($("#edit-team-name")?.value);
   if (!teamName) return toast("Enter an entry/team name.", true);
+  const roomId = clean($("#edit-room-id")?.value) || reg.roomId;
+  const slotNumber = Number($("#edit-slot-number")?.value || reg.slotNumber || 1);
   const existingPlayers = Array.isArray(reg.players) ? reg.players : [];
   const playerRows = $$("[data-edit-player-row]", $("#edit-player-list"));
   const players = playerRows.map((row, index) => ({
@@ -2400,7 +2524,7 @@ async function saveRegistrationEdits(event) {
   }));
   if (!players.length || !players[0].ign) return toast("Player 1/IGL name cannot be blank.", true);
   if (players.some((player, index) => index > 0 && !player.remove && !player.ign)) return toast("Fill a name or choose Remove for each teammate.", true);
-  const payload = { registrationId: reg.id, teamName, iglName: players[0].ign, players };
+  const payload = { registrationId: reg.id, roomId, slotNumber, teamName, iglName: players[0].ign, players };
   try {
     if (SERVER_AVAILABLE && currentAdminCsrf) {
       await apiPost("/api/admin/edit-registration", { ...payload });
@@ -2409,6 +2533,9 @@ async function saveRegistrationEdits(event) {
       const state = loadState();
       const localReg = state.registrations.find((item) => String(item.id) === EDITING_REGISTRATION_ID);
       if (!localReg) throw new Error("Registration not found on this device.");
+      localReg.roomId = roomId;
+      localReg.slotNumber = slotNumber;
+      localReg.slotCapacity = getRoom(roomId)?.capacity || localReg.slotCapacity || 12;
       localReg.teamName = teamName;
       localReg.iglName = players[0].ign;
       localReg.captainName = players[0].ign;
@@ -2421,7 +2548,7 @@ async function saveRegistrationEdits(event) {
     await renderAdminTables();
     renderLeaderboards("#admin-br-preview", "br");
     renderLeaderboards("#admin-cs-preview", "cs");
-    showAdminConfirmation("Registration updated");
+    showAdminConfirmation("Registration, lobby & slot updated");
   } catch (error) {
     toast(error.message || "Could not save registration edits.", true);
   }

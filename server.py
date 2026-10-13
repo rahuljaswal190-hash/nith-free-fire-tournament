@@ -549,6 +549,31 @@ def _load_state_locked():
                 reg["slotNumber"] = new_slot
                 reg["slotCapacity"] = new_capacity
                 changed = True
+    seen_room_slots = defaultdict(set)
+    # Preserve approved and earlier registrations first, reassigning any duplicate active slot in the same room.
+    ordered_regs = sorted(
+        base["registrations"],
+        key=lambda item: (0 if is_approved(item) else 1, str(item.get("submittedAt") or item.get("serverReceivedAt") or "")),
+    )
+    for reg in ordered_regs:
+        if str(reg.get("status") or "Pending").lower() == "rejected":
+            continue
+        room_id = str(reg.get("roomId") or "")
+        capacity = room_capacity(room_id)
+        try:
+            slot = int(reg.get("slotNumber") or 0)
+        except (TypeError, ValueError):
+            slot = 0
+        if 1 <= slot <= capacity and slot not in seen_room_slots[room_id]:
+            seen_room_slots[room_id].add(slot)
+            continue
+        for candidate in range(1, capacity + 1):
+            if candidate not in seen_room_slots[room_id]:
+                reg["slotNumber"] = candidate
+                reg["slotCapacity"] = capacity
+                seen_room_slots[room_id].add(candidate)
+                changed = True
+                break
     if changed:
         save_state(base)
     return base
@@ -760,6 +785,97 @@ def next_available_slot(registrations, room_id, exclude_id=None):
         if slot not in used:
             return slot, capacity
     return None, capacity
+
+
+def assign_registration_slot_and_room(state, reg, requested_room_id=None, requested_slot=None):
+    target_room_id = str(requested_room_id if requested_room_id not in (None, "") else reg.get("roomId") or "").strip().upper()
+    target_room = room_metadata(target_room_id, state.get("roomFees"))
+    if not target_room:
+        return False, "Choose a valid tournament room/lobby."
+    capacity = target_room["capacity"]
+    old_room_id = str(reg.get("roomId") or "").strip().upper()
+    try:
+        old_slot = int(reg.get("slotNumber") or 0)
+    except (TypeError, ValueError):
+        old_slot = 0
+
+    if requested_slot not in (None, ""):
+        if isinstance(requested_slot, bool):
+            return False, f"Choose a valid slot number from 1 to {capacity}."
+        try:
+            desired_slot = int(requested_slot)
+        except (TypeError, ValueError):
+            return False, f"Choose a valid slot number from 1 to {capacity}."
+        if not 1 <= desired_slot <= capacity:
+            return False, f"Choose a valid slot number from 1 to {capacity}."
+    elif target_room_id != old_room_id or not (1 <= old_slot <= capacity):
+        desired_slot, _ = next_available_slot(state.get("registrations", []), target_room_id, exclude_id=reg.get("id"))
+        if desired_slot is None:
+            return False, f"This lobby is full ({capacity}/{capacity})."
+    else:
+        desired_slot = old_slot
+
+    reg_id = str(reg.get("id") or "")
+    occupant = None
+    for item in state.get("registrations", []):
+        if str(item.get("id") or "") == reg_id or str(item.get("status") or "Pending").lower() == "rejected":
+            continue
+        try:
+            item_slot = int(item.get("slotNumber") or 0)
+        except (TypeError, ValueError):
+            item_slot = 0
+        if str(item.get("roomId") or "").strip().upper() == target_room_id and item_slot == desired_slot:
+            occupant = item
+            break
+
+    if occupant is not None:
+        if old_room_id == target_room_id and 1 <= old_slot <= capacity and old_slot != desired_slot:
+            replacement_slot = old_slot
+        else:
+            occupied = used_slots(state.get("registrations", []), target_room_id, exclude_id=reg_id)
+            occupied.add(desired_slot)
+            replacement_slot = next((candidate for candidate in range(1, capacity + 1) if candidate not in occupied), None)
+            if replacement_slot is None:
+                return False, f"Target lobby {target_room_id} is full ({capacity}/{capacity}) and cannot swap slots."
+        occupant["slotNumber"] = replacement_slot
+        occupant["slotCapacity"] = capacity
+        for row in state.get("matchHistory", []):
+            if str(row.get("registrationId") or "") == str(occupant.get("id") or ""):
+                row["slotNumber"] = replacement_slot
+                row["slotCapacity"] = capacity
+
+    windows = schedule_windows(state.get("scheduleSettings"))
+    schedule_key = f"slot{target_room['slot']}"
+    window = next((item for item in windows[target_room["mode"]] if item["id"] == schedule_key), windows[target_room["mode"]][0])
+
+    reg["roomId"] = target_room_id
+    reg["roomTitle"] = target_room["title"]
+    reg["mode"] = target_room["mode"]
+    reg["modeLabel"] = target_room["modeLabel"]
+    reg["format"] = target_room["format"]
+    reg["formatLabel"] = target_room["formatLabel"]
+    reg["variant"] = target_room["variant"]
+    reg["feeRule"] = target_room["feeRule"]
+    reg["scheduleSlot"] = schedule_key
+    reg["scheduleSlotLabel"] = window["label"]
+    reg["scheduleTime"] = window["time"] + " IST"
+    reg["slotNumber"] = desired_slot
+    reg["slotCapacity"] = capacity
+
+    for row in state.get("matchHistory", []):
+        if str(row.get("registrationId") or "") == reg_id:
+            row["roomId"] = target_room_id
+            row["roomTitle"] = target_room["title"]
+            row["mode"] = target_room["mode"]
+            row["modeLabel"] = target_room["modeLabel"]
+            row["format"] = target_room["format"]
+            row["formatLabel"] = target_room["formatLabel"]
+            row["variant"] = target_room["variant"]
+            row["scheduleSlotLabel"] = window["label"]
+            row["scheduleTime"] = window["time"] + " IST"
+            row["slotNumber"] = desired_slot
+            row["slotCapacity"] = capacity
+    return True, None
 
 
 def approved_slots(registrations):
@@ -1513,8 +1629,7 @@ class Handler(SimpleHTTPRequestHandler):
                 except (TypeError, ValueError):
                     existing_slot = 0
                 conflicting_slot = existing_slot in used_slots(state.get("registrations", []), reg.get("roomId"), exclude_id=reg_id)
-                previous_status = str(reg.get("status") or "Pending").lower()
-                if status in ("Approved", "Pending") and (existing_slot < 1 or existing_slot > room_capacity(reg.get("roomId")) or (previous_status == "rejected" and conflicting_slot)):
+                if status in ("Approved", "Pending") and (existing_slot < 1 or existing_slot > room_capacity(reg.get("roomId")) or conflicting_slot):
                     slot, capacity = next_available_slot(state.get("registrations", []), reg.get("roomId"), exclude_id=reg_id)
                     if slot is None:
                         self.send_json({"ok": False, "error": "No slot left in this room/lobby."}, 409)
@@ -1531,6 +1646,29 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             save_state(state)
             self.send_json({"ok": True, "registration": public_registration_status(updated_reg), "state": public_state(state), **admin_summary(state)})
+            return
+
+        if path == "/api/admin/assign-slot":
+            reg_id = str(payload.get("registrationId") or "").strip()
+            reg = next((item for item in state.get("registrations", []) if str(item.get("id")) == reg_id), None)
+            if not reg:
+                self.send_json({"ok": False, "error": "Registration not found"}, 404)
+                return
+            requested_room = payload.get("roomId")
+            requested_slot = payload.get("slotNumber")
+            ok_slot, slot_error = assign_registration_slot_and_room(state, reg, requested_room, requested_slot)
+            if not ok_slot:
+                self.send_json({"ok": False, "error": slot_error}, 400)
+                return
+            reg["registrationEditedAt"] = now_iso()
+            save_state(state)
+            self.send_json({
+                "ok": True,
+                "message": f"Assigned {reg.get('teamName')} to {reg.get('roomId')} slot #{reg.get('slotNumber')}/{reg.get('slotCapacity')}.",
+                "registration": public_registration_status(reg),
+                "state": public_state(state),
+                **admin_summary(state),
+            })
             return
 
         if path == "/api/admin/edit-registration":
@@ -1566,6 +1704,11 @@ class Handler(SimpleHTTPRequestHandler):
             if not updated_players:
                 self.send_json({"ok": False, "error": "At least one roster player is required."}, 400)
                 return
+            if payload.get("roomId") not in (None, "") or payload.get("slotNumber") not in (None, ""):
+                ok_slot, slot_error = assign_registration_slot_and_room(state, reg, payload.get("roomId"), payload.get("slotNumber"))
+                if not ok_slot:
+                    self.send_json({"ok": False, "error": slot_error}, 400)
+                    return
             reg["teamName"] = team_name
             reg["players"] = updated_players
             reg["playersPerEntry"] = len(updated_players)

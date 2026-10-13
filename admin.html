@@ -226,12 +226,16 @@
   <div class="modal-inner admin-edit-modal">
     <button class="modal-close" id="edit-registration-close" type="button" aria-label="Close editor">×</button>
     <span class="eyebrow">Admin editor</span>
-    <h2>Edit registration names</h2>
-    <p>Names support emoji and symbols. Player 1/IGL is required; uncheck a teammate to remove that player from the roster.</p>
+    <h2>Edit registration, lobby &amp; slot</h2>
+    <p>Choose the assigned lobby and slot number for any BR (Solo, Duo, Trio, Squad) or CS (1v1, 2v2, 3v3, 4v4) entry, or edit player names. If another team is in the chosen slot, their slots swap automatically.</p>
     <form id="edit-registration-form">
+      <div class="field-grid">
+        <label>Assigned lobby / room<select id="edit-room-id"></select></label>
+        <label>Assigned slot number<select id="edit-slot-number"></select></label>
+      </div>
       <label>Registration/team name<input id="edit-team-name" maxlength="80" required /></label>
       <div id="edit-player-list" class="edit-player-list"></div>
-      <div class="modal-actions"><button class="btn small" type="submit">Save Name & Roster</button><button class="btn small ghost" id="edit-registration-cancel" type="button">Cancel</button></div>
+      <div class="modal-actions"><button class="btn small" type="submit">Save Slot, Name &amp; Roster</button><button class="btn small ghost" id="edit-registration-cancel" type="button">Cancel</button></div>
     </form>
   </div>
 </dialog>

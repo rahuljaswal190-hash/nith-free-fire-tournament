@@ -388,11 +388,25 @@ class TournamentApiTests(unittest.TestCase):
         edited = self.admin("/api/admin/edit-registration", {
             "registrationId": "BR-TEST-1", "teamName": "⭐ <Team> 🏆",
             "iglName": "✨ Player One", "players": [{"ign": "✨ Player One", "uid": "12345678"}],
+            "slotNumber": 7,
         })
         self.assertEqual(edited["registrations"][0]["teamName"], "⭐ <Team> 🏆")
+        self.assertEqual(edited["registrations"][0]["slotNumber"], 7)
         self.admin("/api/admin/delete-registration", {"registrationId": "BR-TEST-1"})
-        result = self.post("/api/check-status", {"roomId": "BR-SOLO-20-1", "slotNumber": 1})
+        result = self.post("/api/check-status", {"roomId": "BR-SOLO-20-1", "slotNumber": 7})
         self.assertFalse(result["found"])
+
+    def test_admin_can_assign_and_swap_slots_across_br_and_cs(self):
+        self.register_br(registration_id="BR-SLOT-A")
+        self.register_br(registration_id="BR-SLOT-B")
+        swapped = self.admin("/api/admin/assign-slot", {"registrationId": "BR-SLOT-B", "slotNumber": 1})
+        slots_by_id = {row["id"]: row["slotNumber"] for row in swapped["registrations"]}
+        self.assertEqual(slots_by_id["BR-SLOT-B"], 1)
+        self.assertEqual(slots_by_id["BR-SLOT-A"], 2)
+        moved = self.admin("/api/admin/assign-slot", {"registrationId": "BR-SLOT-B", "roomId": "BR-SOLO-20-2", "slotNumber": 15})
+        moved_reg = next(row for row in moved["registrations"] if row["id"] == "BR-SLOT-B")
+        self.assertEqual(moved_reg["roomId"], "BR-SOLO-20-2")
+        self.assertEqual(moved_reg["slotNumber"], 15)
 
     def test_cs_capacity_and_admin_session_is_enforced(self):
         roster = [

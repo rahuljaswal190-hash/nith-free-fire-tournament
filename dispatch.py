@@ -25,6 +25,7 @@ API_PATHS = frozenset({
     "/api/check-status",
     "/api/admin/summary",
     "/api/admin/registration-status",
+    "/api/admin/assign-slot",
     "/api/admin/edit-registration",
     "/api/admin/delete-registration",
     "/api/admin/clear-registrations",
