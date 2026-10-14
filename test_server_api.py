@@ -422,6 +422,44 @@ class TournamentApiTests(unittest.TestCase):
         self.post("/api/check-status", {"roomId": "CS-NM-50-1", "slotNumber": 3}, 400)
         self.post("/api/admin/summary", {}, 401)
 
+    def test_daily_rollover_resets_live_counts_and_keeps_past_dates_for_calendar(self):
+        state = server.default_state()
+        state["registrations"] = [{
+            "id": "BR-YESTERDAY-1", "status": "Approved", "mode": "br", "roomId": "BR-SQUAD-20-1",
+            "teamName": "Yesterday Squad", "playersPerEntry": 4, "fee": 20, "paymentRef": "UTR-YEST",
+            "players": [{"ign": f"P{i}", "uid": f"1234567{i}"} for i in range(4)],
+            "slotNumber": 1, "slotCapacity": 12,
+            "serverReceivedAt": "2026-10-13T15:00:00+00:00",
+            "submittedAt": "2026-10-13T15:00:00+00:00",
+        }]
+        server.save_state(state)
+
+        pub = self.get_state()
+        self.assertEqual(pub["registrationCounts"].get("BR-SQUAD-20-1", 0), 0)
+        self.assertEqual(pub["approvedSlots"], [])
+
+        today_summary = self.admin("/api/admin/summary", {})
+        self.assertEqual(today_summary["totalEntries"], 0)
+        self.assertEqual(today_summary["approvedEntries"], 0)
+        self.assertEqual(today_summary["approvedExpectedAmount"], 0)
+        self.assertEqual(len(today_summary["registrations"]), 1)
+
+        yesterday_summary = self.admin("/api/admin/summary", {"date": "2026-10-13"})
+        self.assertEqual(yesterday_summary["totalEntries"], 1)
+        self.assertEqual(yesterday_summary["approvedEntries"], 1)
+        self.assertEqual(yesterday_summary["approvedExpectedAmount"], 20)
+
+        new_squad = {
+            "id": "BR-TODAY-1", "mode": "br", "playersPerEntry": 4,
+            "roomId": "BR-SQUAD-20-1", "teamName": "Today Squad",
+            "players": [{"ign": f"T{i}", "uid": f"2234567{i}"} for i in range(4)],
+            "whatsapp": "+91 9876543210", "paymentRef": "UTR-TODAY", "acceptedRules": True,
+        }
+        registered_today = self.post("/api/register", new_squad)["registration"]
+        self.assertEqual(registered_today["slotNumber"], 1)
+        after_today = self.admin("/api/admin/summary", {})
+        self.assertEqual(after_today["totalEntries"], 1)
+
     def test_legacy_cs_metadata_and_historical_leaderboard_map_to_squad(self):
         state = server.default_state()
         state["registrations"] = [{
