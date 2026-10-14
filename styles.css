@@ -1541,3 +1541,38 @@ p, li { text-wrap: pretty; }
   .room-card:hover, .mode-card:hover, .fee-card:hover,
   .btn:not(:disabled):active, .menu-toggle:active, .calendar-day:active { transform: none; }
 }
+
+/* Admin Slot Control cell: keep current slot badge and dropdown legible on mobile tables */
+.admin-slot-cell {
+  display: grid;
+  gap: 6px;
+  min-width: 176px;
+}
+.admin-slot-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.slot-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(103, 170, 255, 0.38);
+  background: rgba(10, 132, 255, 0.18);
+  color: #a9d1ff;
+  font-size: 0.78rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+.slot-select {
+  width: 100%;
+  min-width: 170px;
+  min-height: 40px;
+  padding: 5px 28px 5px 10px;
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+

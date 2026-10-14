@@ -544,13 +544,14 @@ def _load_state_locked():
             reg["slotCapacity"] = capacity
             changed = True
         if str(reg.get("status") or "Pending").lower() != "rejected" and (slot < 1 or slot > capacity):
-            new_slot, new_capacity = next_available_slot(base["registrations"], room_id, exclude_id=reg.get("id"))
+            reg_date = registration_date_key(reg)
+            new_slot, new_capacity = next_available_slot(base["registrations"], room_id, exclude_id=reg.get("id"), target_date=reg_date)
             if new_slot is not None:
                 reg["slotNumber"] = new_slot
                 reg["slotCapacity"] = new_capacity
                 changed = True
     seen_room_slots = defaultdict(set)
-    # Preserve approved and earlier registrations first, reassigning any duplicate active slot in the same room.
+    # Preserve approved and earlier registrations first, reassigning any duplicate active slot in the same room and date.
     ordered_regs = sorted(
         base["registrations"],
         key=lambda item: (0 if is_approved(item) else 1, str(item.get("submittedAt") or item.get("serverReceivedAt") or "")),
@@ -559,19 +560,21 @@ def _load_state_locked():
         if str(reg.get("status") or "Pending").lower() == "rejected":
             continue
         room_id = str(reg.get("roomId") or "")
+        reg_date = registration_date_key(reg)
+        room_date_key = (reg_date, room_id)
         capacity = room_capacity(room_id)
         try:
             slot = int(reg.get("slotNumber") or 0)
         except (TypeError, ValueError):
             slot = 0
-        if 1 <= slot <= capacity and slot not in seen_room_slots[room_id]:
-            seen_room_slots[room_id].add(slot)
+        if 1 <= slot <= capacity and slot not in seen_room_slots[room_date_key]:
+            seen_room_slots[room_date_key].add(slot)
             continue
         for candidate in range(1, capacity + 1):
-            if candidate not in seen_room_slots[room_id]:
+            if candidate not in seen_room_slots[room_date_key]:
                 reg["slotNumber"] = candidate
                 reg["slotCapacity"] = capacity
-                seen_room_slots[room_id].add(candidate)
+                seen_room_slots[room_date_key].add(candidate)
                 changed = True
                 break
     if changed:
@@ -651,9 +654,36 @@ def is_approved(reg):
     return str(reg.get("status") or "").lower() == "approved"
 
 
-def registration_counts(registrations):
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def current_ist_date():
+    return datetime.now(timezone.utc).astimezone(IST).date().isoformat()
+
+
+def registration_date_key(reg):
+    if not isinstance(reg, dict):
+        return current_ist_date()
+    for field in ("registrationDate", "matchDate"):
+        explicit = str(reg.get(field) or "").strip()
+        if valid_match_date(explicit):
+            return explicit
+    for field in ("serverReceivedAt", "submittedAt", "createdAt"):
+        derived = match_date_from_timestamp(reg.get(field))
+        if derived:
+            return derived
+    return current_ist_date()
+
+
+def registrations_for_date(registrations, target_date=None):
+    active_date = target_date if valid_match_date(target_date) else current_ist_date()
+    return [reg for reg in (registrations or []) if registration_date_key(reg) == active_date]
+
+
+def registration_counts(registrations, target_date=None):
     counts = {}
-    for reg in registrations:
+    scoped = registrations_for_date(registrations, target_date)
+    for reg in scoped:
         if str(reg.get("status") or "Pending").lower() == "rejected":
             continue
         room_id = reg.get("roomId")
@@ -762,9 +792,10 @@ def normalize_room_fees(value):
     return normalized
 
 
-def used_slots(registrations, room_id, exclude_id=None):
+def used_slots(registrations, room_id, exclude_id=None, target_date=None):
     used = set()
-    for reg in registrations:
+    scoped = registrations_for_date(registrations, target_date)
+    for reg in scoped:
         if exclude_id and str(reg.get("id")) == str(exclude_id):
             continue
         if str(reg.get("roomId")) != str(room_id) or str(reg.get("status") or "Pending").lower() == "rejected":
@@ -778,9 +809,9 @@ def used_slots(registrations, room_id, exclude_id=None):
     return used
 
 
-def next_available_slot(registrations, room_id, exclude_id=None):
+def next_available_slot(registrations, room_id, exclude_id=None, target_date=None):
     capacity = room_capacity(room_id)
-    used = used_slots(registrations, room_id, exclude_id=exclude_id)
+    used = used_slots(registrations, room_id, exclude_id=exclude_id, target_date=target_date)
     for slot in range(1, capacity + 1):
         if slot not in used:
             return slot, capacity
@@ -794,6 +825,7 @@ def assign_registration_slot_and_room(state, reg, requested_room_id=None, reques
         return False, "Choose a valid tournament room/lobby."
     capacity = target_room["capacity"]
     old_room_id = str(reg.get("roomId") or "").strip().upper()
+    reg_date = registration_date_key(reg)
     try:
         old_slot = int(reg.get("slotNumber") or 0)
     except (TypeError, ValueError):
@@ -809,7 +841,7 @@ def assign_registration_slot_and_room(state, reg, requested_room_id=None, reques
         if not 1 <= desired_slot <= capacity:
             return False, f"Choose a valid slot number from 1 to {capacity}."
     elif target_room_id != old_room_id or not (1 <= old_slot <= capacity):
-        desired_slot, _ = next_available_slot(state.get("registrations", []), target_room_id, exclude_id=reg.get("id"))
+        desired_slot, _ = next_available_slot(state.get("registrations", []), target_room_id, exclude_id=reg.get("id"), target_date=reg_date)
         if desired_slot is None:
             return False, f"This lobby is full ({capacity}/{capacity})."
     else:
@@ -817,7 +849,7 @@ def assign_registration_slot_and_room(state, reg, requested_room_id=None, reques
 
     reg_id = str(reg.get("id") or "")
     occupant = None
-    for item in state.get("registrations", []):
+    for item in registrations_for_date(state.get("registrations", []), reg_date):
         if str(item.get("id") or "") == reg_id or str(item.get("status") or "Pending").lower() == "rejected":
             continue
         try:
@@ -832,7 +864,7 @@ def assign_registration_slot_and_room(state, reg, requested_room_id=None, reques
         if old_room_id == target_room_id and 1 <= old_slot <= capacity and old_slot != desired_slot:
             replacement_slot = old_slot
         else:
-            occupied = used_slots(state.get("registrations", []), target_room_id, exclude_id=reg_id)
+            occupied = used_slots(state.get("registrations", []), target_room_id, exclude_id=reg_id, target_date=reg_date)
             occupied.add(desired_slot)
             replacement_slot = next((candidate for candidate in range(1, capacity + 1) if candidate not in occupied), None)
             if replacement_slot is None:
@@ -994,12 +1026,14 @@ def public_room_details(state):
 
 
 def public_state(state):
+    today_regs = registrations_for_date(state.get("registrations", []), current_ist_date())
     return {
+        "currentDate": current_ist_date(),
         "roomOverrides": state.get("roomOverrides", {}),
         "roomFees": state.get("roomFees", {}),
-        "registrationCounts": registration_counts(state.get("registrations", [])),
-        "approvedSlots": approved_slots(state.get("registrations", [])),
-        "approvedTeams": approved_teams(state.get("registrations", [])),
+        "registrationCounts": registration_counts(today_regs, current_ist_date()),
+        "approvedSlots": approved_slots(today_regs),
+        "approvedTeams": approved_teams(today_regs),
         "roomDetails": public_room_details(state),
         "paymentSettings": state.get("paymentSettings", {}),
         "scheduleWindows": schedule_windows(state.get("scheduleSettings")),
@@ -1011,8 +1045,10 @@ def public_state(state):
     }
 
 
-def admin_summary(state):
-    regs = state.get("registrations", [])
+def admin_summary(state, target_date=None):
+    all_regs = state.get("registrations", [])
+    summary_date = target_date if valid_match_date(target_date) else current_ist_date()
+    regs = registrations_for_date(all_regs, summary_date)
     approved = [r for r in regs if is_approved(r)]
     pending = [r for r in regs if str(r.get("status") or "").lower() in ("", "pending admin approval", "pending")]
     rejected = [r for r in regs if str(r.get("status") or "").lower() == "rejected"]
@@ -1027,8 +1063,10 @@ def admin_summary(state):
         key = r.get("formatLabel") or r.get("variant") or r.get("modeLabel") or "Unknown"
         by_mode[key] = by_mode.get(key, 0) + 1
     return {
-        "registrations": regs,
-        "approvedRegistrations": approved,
+        "currentDate": current_ist_date(),
+        "summaryDate": summary_date,
+        "registrations": all_regs,
+        "approvedRegistrations": [r for r in all_regs if is_approved(r)],
         "totalEntries": len(regs),
         "approvedEntries": len(approved),
         "pendingEntries": len(pending),
@@ -1039,7 +1077,7 @@ def admin_summary(state):
         "approvedExpectedAmount": approved_expected_amount,
         "reportedPaidAmount": reported_paid,
         "approvedReportedPaidAmount": approved_reported_paid,
-        "registrationCounts": registration_counts(regs),
+        "registrationCounts": registration_counts(regs, summary_date),
         "approvedSlots": approved_slots(regs),
         "approvedTeams": approved_teams(regs),
         "scheduleSettings": state.get("scheduleSettings", DEFAULT_SCHEDULE_SETTINGS),
@@ -1573,6 +1611,7 @@ class Handler(SimpleHTTPRequestHandler):
             reg["slotNumber"] = slot
             reg["slotCapacity"] = capacity
             reg["serverReceivedAt"] = server_stamp
+            reg["registrationDate"] = current_ist_date()
             state.setdefault("registrations", []).insert(0, reg)
             save_state(state)
             self.send_json({
@@ -1598,7 +1637,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": f"Enter a slot number from 1 to {capacity}."}, 400)
                 return
             found_reg = None
-            for reg in state.get("registrations", []):
+            today_regs = registrations_for_date(state.get("registrations", []), current_ist_date())
+            for reg in today_regs:
                 try:
                     reg_slot = int(reg.get("slotNumber") or 0)
                 except (TypeError, ValueError):
@@ -1610,7 +1650,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/admin/summary":
-            self.send_json({"ok": True, **admin_summary(state)})
+            self.send_json({"ok": True, **admin_summary(state, payload.get("date"))})
             return
 
         if path == "/api/admin/registration-status":
@@ -1628,9 +1668,10 @@ class Handler(SimpleHTTPRequestHandler):
                     existing_slot = int(reg.get("slotNumber") or 0)
                 except (TypeError, ValueError):
                     existing_slot = 0
-                conflicting_slot = existing_slot in used_slots(state.get("registrations", []), reg.get("roomId"), exclude_id=reg_id)
+                reg_date = registration_date_key(reg)
+                conflicting_slot = existing_slot in used_slots(state.get("registrations", []), reg.get("roomId"), exclude_id=reg_id, target_date=reg_date)
                 if status in ("Approved", "Pending") and (existing_slot < 1 or existing_slot > room_capacity(reg.get("roomId")) or conflicting_slot):
-                    slot, capacity = next_available_slot(state.get("registrations", []), reg.get("roomId"), exclude_id=reg_id)
+                    slot, capacity = next_available_slot(state.get("registrations", []), reg.get("roomId"), exclude_id=reg_id, target_date=reg_date)
                     if slot is None:
                         self.send_json({"ok": False, "error": "No slot left in this room/lobby."}, 409)
                         return
@@ -1677,11 +1718,12 @@ class Handler(SimpleHTTPRequestHandler):
             if not reg:
                 self.send_json({"ok": False, "error": "Registration not found"}, 404)
                 return
-            team_name = normalize_name(payload.get("teamName"))
+            raw_team_name = payload.get("teamName") if "teamName" in payload else reg.get("teamName")
+            team_name = normalize_name(raw_team_name)
             if not team_name:
                 self.send_json({"ok": False, "error": "Team/entry name cannot be blank."}, 400)
                 return
-            player_edits = payload.get("players")
+            player_edits = payload.get("players") if "players" in payload else reg.get("players")
             if not isinstance(player_edits, list) or not player_edits:
                 self.send_json({"ok": False, "error": "At least one roster player is required."}, 400)
                 return

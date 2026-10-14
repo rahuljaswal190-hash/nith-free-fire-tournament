@@ -15,6 +15,7 @@ let ROOM_QR_DATA = "";
 let EDITING_REGISTRATION_ID = "";
 let lastStatusSearch = null;
 let ADMIN_CALENDAR_SELECTED_DATE = "";
+let LAST_AUTO_TODAY_IST = "";
 let paymentAutoRestored = false;
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
@@ -237,7 +238,8 @@ function roomScheduleWindow(room) {
 
 function localRegistrationsForRoom(roomId) {
   const state = loadState();
-  return state.registrations.filter((entry) => entry.roomId === roomId && entry.localSlotHeld !== false && String(entry.status || "Pending").toLowerCase() !== "rejected");
+  const today = todayDateIST();
+  return state.registrations.filter((entry) => entry.roomId === roomId && entry.localSlotHeld !== false && String(entry.status || "Pending").toLowerCase() !== "rejected" && registrationDateKey(entry) === today);
 }
 
 function registrationCountForRoom(roomId) {
@@ -1304,13 +1306,15 @@ function setupDashboardPage() {
 
 async function renderDashboardData() {
   if (!SERVER_AVAILABLE) throw new Error("Live server unavailable");
-  const summary = await apiPost("/api/admin/summary", {});
-  renderAdminSummaryCards(summary);
+  const today = todayDateIST();
+  const summary = await apiPost("/api/admin/summary", { date: today });
+  const allRegs = summary.registrations || [];
+  ADMIN_REGISTRATIONS = allRegs;
+  const todayRegs = registrationsForDate(allRegs, today);
+  renderAdminSummaryCards(computeDateSummaryStats(allRegs, today));
   const table = $("#dashboard-registrations");
   if (table) {
-    const regs = summary.registrations || [];
-    ADMIN_REGISTRATIONS = regs;
-    table.innerHTML = regs.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Slot (Admin Control)</th><th>ID</th><th>Mode</th><th>Format</th><th>Match time</th><th>Room</th><th>Entry/Team</th><th>IGL/Player</th><th>Player details</th><th>WhatsApp</th><th>Fee</th><th>Payment</th></tr></thead><tbody>${regs.map((r) => `<tr><td>${registrationStatusBadge(r.status)}</td><td>${adminSlotControlHtml(r, regs)}</td><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(registrationFormatLabel(r) || r.variant || "-")}</td><td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.iglName || r.captainName)}</td><td>${playerListHtml(r)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatEntryFee(r.fee)}</td><td>${escapeHtml(r.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><h3>No registrations yet</h3><p>Registrations will appear live here.</p></div>`;
+    table.innerHTML = todayRegs.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Slot (Admin Control)</th><th>ID</th><th>Mode</th><th>Format</th><th>Match time</th><th>Room</th><th>Entry/Team</th><th>IGL/Player</th><th>Player details</th><th>WhatsApp</th><th>Fee</th><th>Payment</th></tr></thead><tbody>${todayRegs.map((r) => `<tr><td>${registrationStatusBadge(r.status)}</td><td>${adminSlotControlHtml(r, todayRegs)}</td><td>${escapeHtml(r.id)}</td><td>${escapeHtml(r.modeLabel)}</td><td>${escapeHtml(registrationFormatLabel(r) || r.variant || "-")}</td><td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td><td>${escapeHtml(r.roomId)}</td><td>${escapeHtml(r.teamName)}</td><td>${escapeHtml(r.iglName || r.captainName)}</td><td>${playerListHtml(r)}</td><td>${escapeHtml(r.whatsapp)}</td><td>${formatEntryFee(r.fee)}</td><td>${escapeHtml(r.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><h3>No registrations for today (${escapeHtml(formatIsoDate(today))}) yet</h3><p>Today's live registrations will appear here. Open the Admin Panel calendar to view earlier dates.</p></div>`;
     bindAdminSlotSelects(table);
   }
 }
@@ -1343,18 +1347,22 @@ function adminSlotControlHtml(reg, allRegistrations = ADMIN_REGISTRATIONS) {
   const room = getRoom(reg.roomId);
   const capacity = Number(room?.capacity || reg.slotCapacity || (String(reg.roomId || "").startsWith("CS-") ? 2 : 12));
   const currentSlot = Number(reg.slotNumber || 1);
+  const regDate = registrationDateKey(reg);
+  const sameDayRoomRegs = (allRegistrations || []).filter((item) =>
+    registrationDateKey(item) === regDate
+    && String(item.roomId) === String(reg.roomId)
+    && String(item.status || "Pending").toLowerCase() !== "rejected"
+  );
   const options = Array.from({ length: capacity }, (_, index) => {
     const slot = index + 1;
-    const occupant = (allRegistrations || []).find((item) =>
+    const occupant = sameDayRoomRegs.find((item) =>
       String(item.id) !== String(reg.id)
-      && String(item.roomId) === String(reg.roomId)
-      && String(item.status || "Pending").toLowerCase() !== "rejected"
       && Number(item.slotNumber) === slot
     );
     const suffix = slot === currentSlot ? " (Current)" : occupant ? ` (Swap: ${occupant.teamName || "Team"})` : " (Open)";
-    return `<option value="${slot}" ${slot === currentSlot ? "selected" : ""}>#${slot}/${capacity}${escapeHtml(suffix)}</option>`;
+    return `<option value="${slot}" ${slot === currentSlot ? "selected" : ""}>Slot #${slot}/${capacity}${escapeHtml(suffix)}</option>`;
   }).join("");
-  return `<div class="admin-slot-cell"><select class="slot-select" data-reg-slot-select="${escapeHtml(reg.id)}" aria-label="Assign slot for ${escapeHtml(reg.teamName || reg.id)}">${options}</select><br><small>${escapeHtml(reg.roomId || "")}</small></div>`;
+  return `<div class="admin-slot-cell" style="display:grid;gap:6px;min-width:176px;"><div class="admin-slot-badge-row" style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;"><strong class="slot-pill" style="display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;border:1px solid rgba(103,170,255,0.38);background:rgba(10,132,255,0.18);color:#a9d1ff;font-size:0.78rem;font-weight:760;white-space:nowrap;">Slot #${escapeHtml(currentSlot)}/${escapeHtml(capacity)}</strong><small style="font-size:0.74rem;opacity:0.86;">${escapeHtml(reg.roomId || "")}</small></div><select class="slot-select" style="width:100%;min-width:170px;min-height:40px;padding:5px 28px 5px 10px;font-size:0.84rem;font-weight:650;" data-reg-slot-select="${escapeHtml(reg.id)}" aria-label="Assign slot for ${escapeHtml(reg.teamName || reg.id)}">${options}</select></div>`;
 }
 
 function bindAdminSlotSelects(scope = document) {
@@ -1375,7 +1383,23 @@ async function assignRegistrationSlot(registrationId, slotNumber, roomId = undef
     if (SERVER_AVAILABLE && currentAdminCsrf) {
       const payload = { registrationId, slotNumber: Number(slotNumber) };
       if (roomId) payload.roomId = roomId;
-      const result = await apiPost("/api/admin/assign-slot", payload);
+      let result;
+      try {
+        result = await apiPost("/api/admin/assign-slot", payload);
+      } catch (err) {
+        if (/404|not found/i.test(String(err?.message || ""))) {
+          const existing = ADMIN_REGISTRATIONS.find((item) => String(item.id) === String(registrationId));
+          result = await apiPost("/api/admin/edit-registration", {
+            ...payload,
+            teamName: existing?.teamName || "Team",
+            players: Array.isArray(existing?.players) && existing.players.length
+              ? existing.players
+              : [{ ign: existing?.iglName || existing?.captainName || "Player 1", uid: existing?.iglUid || "" }]
+          });
+        } else {
+          throw err;
+        }
+      }
       await refreshStateFromServer();
       if (document.body?.dataset?.page === "dashboard") {
         await renderDashboardData();
@@ -1394,8 +1418,10 @@ async function assignRegistrationSlot(registrationId, slotNumber, roomId = undef
     const capacity = Number(room?.capacity || 12);
     const desired = Number(slotNumber);
     if (desired < 1 || desired > capacity) throw new Error(`Choose a slot from 1 to ${capacity}.`);
+    const regDate = registrationDateKey(reg);
     const occupant = (state.registrations || []).find((item) =>
       String(item.id) !== String(registrationId)
+      && registrationDateKey(item) === regDate
       && String(item.roomId) === String(targetRoomId)
       && String(item.status || "Pending").toLowerCase() !== "rejected"
       && Number(item.slotNumber) === desired
@@ -1639,13 +1665,50 @@ function updateAdminStorageStatus(info) {
 }
 
 function registrationDateKey(registration) {
+  const explicit = clean(registration?.registrationDate || registration?.matchDate);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit;
   const raw = registration?.serverReceivedAt || registration?.submittedAt || registration?.createdAt;
-  if (!raw) return "";
+  if (!raw) return todayDateIST();
   const dateValue = new Date(raw);
-  if (Number.isNaN(dateValue.getTime())) return "";
+  if (Number.isNaN(dateValue.getTime())) return todayDateIST();
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(dateValue);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+function activeAdminDate() {
+  const today = todayDateIST();
+  if (!ADMIN_CALENDAR_SELECTED_DATE || (LAST_AUTO_TODAY_IST && ADMIN_CALENDAR_SELECTED_DATE === LAST_AUTO_TODAY_IST && LAST_AUTO_TODAY_IST !== today)) {
+    ADMIN_CALENDAR_SELECTED_DATE = today;
+  }
+  LAST_AUTO_TODAY_IST = today;
+  return ADMIN_CALENDAR_SELECTED_DATE;
+}
+
+function registrationsForDate(registrations = [], dateKey = activeAdminDate()) {
+  const target = clean(dateKey) || todayDateIST();
+  return (registrations || []).filter((reg) => registrationDateKey(reg) === target);
+}
+
+function computeDateSummaryStats(registrations = [], dateKey = activeAdminDate()) {
+  const target = clean(dateKey) || todayDateIST();
+  const dayRegs = registrationsForDate(registrations, target);
+  const approved = dayRegs.filter((r) => String(r.status || "").toLowerCase() === "approved");
+  const pending = dayRegs.filter((r) => String(r.status || "Pending").toLowerCase() === "pending");
+  const paidCheck = (ref) => {
+    const text = clean(ref).toLowerCase();
+    if (!text) return false;
+    return !["pay after", "after confirmation", "pending", "later", "not paid", "free entry", "not required"].some((word) => text.includes(word));
+  };
+  return {
+    summaryDate: target,
+    totalEntries: dayRegs.length,
+    pendingEntries: pending.length,
+    approvedEntries: approved.length,
+    approvedPlayers: approved.reduce((sum, r) => sum + Number(r.playersPerEntry || r.players?.length || 0), 0),
+    approvedReportedPaidAmount: approved.filter((r) => paidCheck(r.paymentRef)).reduce((sum, r) => sum + Number(r.fee || 0), 0),
+    approvedExpectedAmount: approved.reduce((sum, r) => sum + Number(r.fee || 0), 0)
+  };
 }
 
 function registrationTimeLabel(registration) {
@@ -1656,20 +1719,66 @@ function registrationTimeLabel(registration) {
   return dateValue.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" });
 }
 
+function renderAdminRegistrationsTable(registrations = ADMIN_REGISTRATIONS, selectedDate = activeAdminDate()) {
+  const regs = $("#admin-registrations");
+  if (!regs) return;
+  const today = todayDateIST();
+  const dateLabel = formatIsoDate(selectedDate);
+  const isToday = selectedDate === today;
+  const dayRegistrations = registrationsForDate(registrations, selectedDate);
+  if (!dayRegistrations.length) {
+    regs.innerHTML = `<div class="empty-state"><h3>No registrations for ${escapeHtml(dateLabel)}${isToday ? " (Today)" : ""}</h3><p>${isToday ? "Live registrations for today's matches will appear here. Select a past date on the Registration Calendar above to view earlier days." : "No registrations were submitted on this calendar date."}</p></div>`;
+    return;
+  }
+  regs.innerHTML = `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Slot (Admin Control)</th><th>Actions</th><th>ID</th><th>Mode</th><th>Format/Type</th><th>Match time</th><th>Room</th><th>Team/Entry</th><th>IGL/Player</th><th>Players</th><th>WhatsApp</th><th>Fee</th><th>Payment Ref</th><th>Time</th></tr></thead><tbody>${dayRegistrations.map((r) => `
+    <tr>
+      <td>${registrationStatusBadge(r.status)}</td>
+      <td>${adminSlotControlHtml(r, registrations)}</td>
+      <td class="admin-row-actions">
+        <button class="btn small" type="button" data-reg-action="Approved" data-reg-id="${escapeHtml(r.id)}">Approve</button>
+        <button class="btn small ghost danger" type="button" data-reg-action="Rejected" data-reg-id="${escapeHtml(r.id)}">Reject</button>
+        <button class="btn small ghost" type="button" data-reg-edit="${escapeHtml(r.id)}">Edit slot / names</button>
+        <button class="btn small ghost danger" type="button" data-reg-delete="${escapeHtml(r.id)}">Remove</button>
+      </td>
+      <td>${escapeHtml(r.id)}</td>
+      <td>${escapeHtml(r.modeLabel)}</td>
+      <td>${escapeHtml(registrationFormatLabel(r) || r.variant || "-")}</td>
+      <td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td>
+      <td>${escapeHtml(r.roomId)}</td>
+      <td>${escapeHtml(r.teamName)}</td>
+      <td>${escapeHtml(r.iglName || r.captainName)}<br><small>${escapeHtml(r.iglUid || r.players?.[0]?.uid || "")}</small></td>
+      <td>${playerListHtml(r)}</td>
+      <td>${escapeHtml(r.whatsapp)}</td>
+      <td>${formatEntryFee(r.fee)}</td>
+      <td>${escapeHtml(r.paymentRef || "-")}</td>
+      <td>${escapeHtml(r.submittedAtDisplay || "-")}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+  bindAdminSlotSelects(regs);
+  $$('[data-reg-action]', regs).forEach((button) => {
+    button.addEventListener("click", () => updateRegistrationStatus(button.dataset.regId, button.dataset.regAction));
+  });
+  $$('[data-reg-edit]', regs).forEach((button) => button.addEventListener("click", () => openRegistrationEditor(button.dataset.regEdit)));
+  $$('[data-reg-delete]', regs).forEach((button) => button.addEventListener("click", () => deleteRegistration(button.dataset.regDelete)));
+}
+
 function renderAdminCalendar(registrations = []) {
   const calendar = $("#registration-calendar");
   const monthInput = $("#registration-calendar-month");
   const summary = $("#registration-calendar-summary");
   const dayDetails = $("#registrations-for-day");
   if (!calendar || !monthInput) return;
-  if (!monthInput.value) monthInput.value = todayDateIST().slice(0, 7);
+  const today = todayDateIST();
+  const currentSelected = activeAdminDate();
+  if (!monthInput.value) monthInput.value = currentSelected.slice(0, 7);
   if (monthInput.dataset.bound !== "true") {
     monthInput.dataset.bound = "true";
     monthInput.addEventListener("change", () => {
-      const resultDate = $("#admin-result-date")?.value || "";
-      ADMIN_CALENDAR_SELECTED_DATE = resultDate.startsWith(`${monthInput.value}-`) ? resultDate : `${monthInput.value}-01`;
+      const nextDate = today.startsWith(`${monthInput.value}-`) ? today : `${monthInput.value}-01`;
+      ADMIN_CALENDAR_SELECTED_DATE = nextDate;
       const resultInput = $("#admin-result-date");
       if (resultInput) resultInput.value = ADMIN_CALENDAR_SELECTED_DATE;
+      renderAdminSummaryCards(computeDateSummaryStats(ADMIN_REGISTRATIONS, ADMIN_CALENDAR_SELECTED_DATE));
+      renderAdminRegistrationsTable(ADMIN_REGISTRATIONS, ADMIN_CALENDAR_SELECTED_DATE);
       renderAdminCalendar(ADMIN_REGISTRATIONS);
       renderFinalScoreTable();
     });
@@ -1695,13 +1804,16 @@ function renderAdminCalendar(registrations = []) {
   const monthKey = monthInput.value;
   const daysWithRegistrations = [...counts.keys()].filter((key) => key.startsWith(`${monthKey}-`)).sort();
   if (!ADMIN_CALENDAR_SELECTED_DATE.startsWith(`${monthKey}-`)) {
-    const resultDate = $("#admin-result-date")?.value || "";
-    ADMIN_CALENDAR_SELECTED_DATE = resultDate.startsWith(`${monthKey}-`) ? resultDate : (daysWithRegistrations[0] || `${monthKey}-01`);
+    ADMIN_CALENDAR_SELECTED_DATE = today.startsWith(`${monthKey}-`) ? today : (daysWithRegistrations[daysWithRegistrations.length - 1] || `${monthKey}-01`);
+  }
+  const resultInput = $("#admin-result-date");
+  if (resultInput && resultInput.value !== ADMIN_CALENDAR_SELECTED_DATE) {
+    resultInput.value = ADMIN_CALENDAR_SELECTED_DATE;
   }
   const totalInMonth = daysWithRegistrations.reduce((sum, key) => sum + counts.get(key), 0);
   const savedResultDates = [...resultsByDate.keys()].filter((key) => key.startsWith(`${monthKey}-`));
   const totalResultsInMonth = savedResultDates.reduce((sum, key) => sum + resultsByDate.get(key).length, 0);
-  if (summary) summary.textContent = `${totalInMonth} registration${totalInMonth === 1 ? "" : "s"} across ${daysWithRegistrations.length} active registration date${daysWithRegistrations.length === 1 ? "" : "s"}; ${totalResultsInMonth} saved leaderboard result${totalResultsInMonth === 1 ? "" : "s"}. Select any calendar day. Each day shows registration and saved leaderboard-result counts.`;
+  if (summary) summary.textContent = `${totalInMonth} registration${totalInMonth === 1 ? "" : "s"} across ${daysWithRegistrations.length} active registration date${daysWithRegistrations.length === 1 ? "" : "s"}; ${totalResultsInMonth} saved leaderboard result${totalResultsInMonth === 1 ? "" : "s"}. Defaults to Today (${formatIsoDate(today)}) — select any calendar day to view or edit that date's registrations and slots.`;
   const weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const firstDayOffset = (new Date(year, month - 1, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -1712,13 +1824,16 @@ function renderAdminCalendar(registrations = []) {
     const count = Number(counts.get(key) || 0);
     const resultCount = (resultsByDate.get(key) || []).length;
     const selected = key === ADMIN_CALENDAR_SELECTED_DATE;
-    return `<button type="button" class="calendar-day ${count ? "has-registrations" : ""} ${resultCount ? "has-results" : ""} ${selected ? "selected" : ""}" data-calendar-date="${key}" aria-label="${formatIsoDate(key)}: ${count} registration${count === 1 ? "" : "s"}; ${resultCount} leaderboard result${resultCount === 1 ? "" : "s"}"><span>${day}</span><small>${count} reg · ${resultCount} LB</small></button>`;
+    const isToday = key === today;
+    return `<button type="button" class="calendar-day ${count ? "has-registrations" : ""} ${resultCount ? "has-results" : ""} ${selected ? "selected" : ""}" data-calendar-date="${key}" aria-label="${formatIsoDate(key)}${isToday ? " (Today)" : ""}: ${count} registration${count === 1 ? "" : "s"}; ${resultCount} leaderboard result${resultCount === 1 ? "" : "s"}"><span>${day}${isToday ? " •" : ""}</span><small>${count} reg · ${resultCount} LB</small></button>`;
   }).join("");
   calendar.innerHTML = `<div class="calendar-weekdays">${weekdayNames.map((name) => `<span>${name}</span>`).join("")}</div><div class="calendar-days">${blanks}${dayButtons}</div>`;
   $$('[data-calendar-date]', calendar).forEach((button) => button.addEventListener("click", () => {
-    ADMIN_CALENDAR_SELECTED_DATE = button.dataset.calendarDate || "";
-    const resultInput = $("#admin-result-date");
-    if (resultInput) resultInput.value = ADMIN_CALENDAR_SELECTED_DATE;
+    ADMIN_CALENDAR_SELECTED_DATE = button.dataset.calendarDate || todayDateIST();
+    const dateField = $("#admin-result-date");
+    if (dateField) dateField.value = ADMIN_CALENDAR_SELECTED_DATE;
+    renderAdminSummaryCards(computeDateSummaryStats(ADMIN_REGISTRATIONS, ADMIN_CALENDAR_SELECTED_DATE));
+    renderAdminRegistrationsTable(ADMIN_REGISTRATIONS, ADMIN_CALENDAR_SELECTED_DATE);
     renderAdminCalendar(ADMIN_REGISTRATIONS);
     renderFinalScoreTable();
   }));
@@ -1726,6 +1841,7 @@ function renderAdminCalendar(registrations = []) {
     const selectedRows = registrationsByDate.get(ADMIN_CALENDAR_SELECTED_DATE) || [];
     const resultRows = resultsByDate.get(ADMIN_CALENDAR_SELECTED_DATE) || [];
     const dateTitle = formatIsoDate(ADMIN_CALENDAR_SELECTED_DATE);
+    const isToday = ADMIN_CALENDAR_SELECTED_DATE === today;
     const resultBreakdown = { br: resultRows.filter((row) => row.mode === "br").length, cs: resultRows.filter((row) => row.mode === "cs").length };
     const resultsStatus = resultRows.length
       ? `<p class="calendar-result-available"><b>Leaderboard:</b> ${resultRows.length} saved result${resultRows.length === 1 ? "" : "s"} (${resultBreakdown.br} BR, ${resultBreakdown.cs} CS). This date is selected for result entry below.</p>`
@@ -1733,11 +1849,29 @@ function renderAdminCalendar(registrations = []) {
     const registrationsStatus = selectedRows.length
       ? `<p><b>Registrations:</b> ${selectedRows.length} submitted on this date.</p>`
       : `<p class="calendar-result-empty"><b>Registrations:</b> No registrations were received on this date.</p>`;
+    const jumpTodayBtn = !isToday
+      ? `<div class="admin-actions" style="margin-top:8px;"><button class="btn small ghost" type="button" data-calendar-jump-today>Return to Today (${escapeHtml(formatIsoDate(today))})</button></div>`
+      : "";
     const table = selectedRows.length
-      ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Submitted time (IST)</th><th>Slot (Admin Control)</th><th>Mode / format</th><th>Entry / team</th><th>Roster</th><th>Room</th><th>Contact</th><th>Payment ref</th></tr></thead><tbody>${selectedRows.map((reg) => `<tr><td>${registrationStatusBadge(reg.status)}</td><td>${escapeHtml(registrationTimeLabel(reg))}</td><td>${adminSlotControlHtml(reg, registrations)}</td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(registrationFormatLabel(reg) || reg.variant || "-")}</td><td>${escapeHtml(reg.teamName || "-")}</td><td>${playerListHtml(reg)}</td><td>${escapeHtml(reg.roomId || "-")}</td><td>${escapeHtml(reg.whatsapp || "-")}</td><td>${escapeHtml(reg.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>`
-      : `<div class="empty-state compact-empty"><h3>No registrations for this date</h3><p>Entries submitted on this day will appear here.</p></div>`;
-    dayDetails.innerHTML = `<h3>${escapeHtml(dateTitle)}</h3><div class="calendar-date-status" role="status">${registrationsStatus}${resultsStatus}<p class="disclaimer">The match date field below is set to ${escapeHtml(dateTitle)}. Use any row's Slot dropdown to assign or swap slots immediately.</p></div>${table}`;
+      ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Submitted time (IST)</th><th>Slot (Admin Control)</th><th>Actions</th><th>Mode / format</th><th>Entry / team</th><th>Roster</th><th>Room</th><th>Contact</th><th>Payment ref</th></tr></thead><tbody>${selectedRows.map((reg) => `<tr><td>${registrationStatusBadge(reg.status)}</td><td>${escapeHtml(registrationTimeLabel(reg))}</td><td>${adminSlotControlHtml(reg, registrations)}</td><td class="admin-row-actions"><button class="btn small" type="button" data-reg-action="Approved" data-reg-id="${escapeHtml(reg.id)}">Approve</button><button class="btn small ghost danger" type="button" data-reg-action="Rejected" data-reg-id="${escapeHtml(reg.id)}">Reject</button><button class="btn small ghost" type="button" data-reg-edit="${escapeHtml(reg.id)}">Edit slot / names</button><button class="btn small ghost danger" type="button" data-reg-delete="${escapeHtml(reg.id)}">Remove</button></td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(registrationFormatLabel(reg) || reg.variant || "-")}</td><td>${escapeHtml(reg.teamName || "-")}</td><td>${playerListHtml(reg)}</td><td>${escapeHtml(reg.roomId || "-")}</td><td>${escapeHtml(reg.whatsapp || "-")}</td><td>${escapeHtml(reg.paymentRef || "-")}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty-state compact-empty"><h3>No registrations for ${escapeHtml(dateTitle)}${isToday ? " (Today)" : ""}</h3><p>${isToday ? "New registrations submitted today will appear here automatically." : "Entries submitted on this day will appear here."}</p></div>`;
+    dayDetails.innerHTML = `<h3>${escapeHtml(dateTitle)}${isToday ? " (Today)" : ""}</h3><div class="calendar-date-status" role="status">${registrationsStatus}${resultsStatus}<p class="disclaimer">Showing entries for ${escapeHtml(dateTitle)}. Use any row's Slot dropdown or "Edit slot / names" button to assign or swap slots.</p>${jumpTodayBtn}</div>${table}`;
     bindAdminSlotSelects(dayDetails);
+    $$('[data-reg-action]', dayDetails).forEach((button) => {
+      button.addEventListener("click", () => updateRegistrationStatus(button.dataset.regId, button.dataset.regAction));
+    });
+    $$('[data-reg-edit]', dayDetails).forEach((button) => button.addEventListener("click", () => openRegistrationEditor(button.dataset.regEdit)));
+    $$('[data-reg-delete]', dayDetails).forEach((button) => button.addEventListener("click", () => deleteRegistration(button.dataset.regDelete)));
+    $('[data-calendar-jump-today]', dayDetails)?.addEventListener("click", () => {
+      ADMIN_CALENDAR_SELECTED_DATE = todayDateIST();
+      if (monthInput) monthInput.value = ADMIN_CALENDAR_SELECTED_DATE.slice(0, 7);
+      const dateField = $("#admin-result-date");
+      if (dateField) dateField.value = ADMIN_CALENDAR_SELECTED_DATE;
+      renderAdminSummaryCards(computeDateSummaryStats(ADMIN_REGISTRATIONS, ADMIN_CALENDAR_SELECTED_DATE));
+      renderAdminRegistrationsTable(ADMIN_REGISTRATIONS, ADMIN_CALENDAR_SELECTED_DATE);
+      renderAdminCalendar(ADMIN_REGISTRATIONS);
+      renderFinalScoreTable();
+    });
   }
 }
 function updatePaymentPersistenceStatus(payment = {}, storageInfo = null) {
@@ -2374,27 +2508,24 @@ async function savePaymentSettings() {
 async function renderAdminTables(prefetchedSummary = null) {
   let state = loadState();
   let summaryForCards = null;
+  const selectedDate = activeAdminDate();
   if (SERVER_AVAILABLE && currentAdminCsrf) {
     try {
-      const summary = prefetchedSummary || await apiPost("/api/admin/summary", {});
+      const summary = prefetchedSummary || await apiPost("/api/admin/summary", { date: selectedDate });
       summaryForCards = summary;
       ADMIN_SUMMARY = summary;
       state = normalizeState({ ...loadState(), registrations: summary.registrations || [] });
       ADMIN_REGISTRATIONS = summary.registrations || [];
-      renderAdminSummaryCards(summary);
+      renderAdminSummaryCards(computeDateSummaryStats(ADMIN_REGISTRATIONS, selectedDate));
       populateAdminSettingsFromSummary(summary);
     } catch (error) {
       toast(error.message || "Could not load admin summary.", true);
     }
   } else {
     ADMIN_REGISTRATIONS = state.registrations || [];
+    const dateStats = computeDateSummaryStats(ADMIN_REGISTRATIONS, selectedDate);
     summaryForCards = {
-      totalEntries: ADMIN_REGISTRATIONS.length,
-      pendingEntries: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "Pending").toLowerCase() === "pending").length,
-      approvedEntries: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").length,
-      approvedPlayers: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").reduce((sum, r) => sum + Number(r.playersPerEntry || r.players?.length || 0), 0),
-      approvedReportedPaidAmount: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved" && r.paymentRef).reduce((sum, r) => sum + Number(r.fee || 0), 0),
-      approvedExpectedAmount: ADMIN_REGISTRATIONS.filter((r) => String(r.status || "").toLowerCase() === "approved").reduce((sum, r) => sum + Number(r.fee || 0), 0),
+      ...dateStats,
       scheduleSettings: loadState().scheduleSettings || { br: { startTime: "21:00", durationHours: 1, gapHours: 0 }, cs: { startTime: "21:00", durationHours: 1, gapHours: 0 } },
       paymentSettings: loadState().paymentSettings || {},
       roomDetails: loadState().roomDetails || {},
@@ -2403,49 +2534,13 @@ async function renderAdminTables(prefetchedSummary = null) {
       storageInfo: null
     };
     ADMIN_SUMMARY = summaryForCards;
-    renderAdminSummaryCards(summaryForCards);
+    renderAdminSummaryCards(dateStats);
     populateAdminSettingsFromSummary(summaryForCards);
   }
 
-  renderFinalScoreTable();
-
-  const regs = $("#admin-registrations");
-  if (regs) {
-    if (!state.registrations.length) {
-      regs.innerHTML = `<div class="empty-state"><h3>No registrations yet</h3><p>Live registrations will appear here after players submit forms.</p></div>`;
-    } else {
-      regs.innerHTML = `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Status</th><th>Slot (Admin Control)</th><th>Actions</th><th>ID</th><th>Mode</th><th>Format/Type</th><th>Match time</th><th>Room</th><th>Team/Entry</th><th>IGL/Player</th><th>Players</th><th>WhatsApp</th><th>Fee</th><th>Payment Ref</th><th>Time</th></tr></thead><tbody>${state.registrations.map((r) => `
-        <tr>
-          <td>${registrationStatusBadge(r.status)}</td>
-          <td>${adminSlotControlHtml(r, state.registrations)}</td>
-          <td class="admin-row-actions">
-            <button class="btn small" type="button" data-reg-action="Approved" data-reg-id="${escapeHtml(r.id)}">Approve</button>
-            <button class="btn small ghost danger" type="button" data-reg-action="Rejected" data-reg-id="${escapeHtml(r.id)}">Reject</button>
-            <button class="btn small ghost" type="button" data-reg-edit="${escapeHtml(r.id)}">Edit slot / names</button>
-            <button class="btn small ghost danger" type="button" data-reg-delete="${escapeHtml(r.id)}">Remove</button>
-          </td>
-          <td>${escapeHtml(r.id)}</td>
-          <td>${escapeHtml(r.modeLabel)}</td>
-          <td>${escapeHtml(registrationFormatLabel(r) || r.variant || "-")}</td>
-          <td>${escapeHtml(r.scheduleTime || r.scheduleSlotLabel || "-")}</td>
-          <td>${escapeHtml(r.roomId)}</td>
-          <td>${escapeHtml(r.teamName)}</td>
-          <td>${escapeHtml(r.iglName || r.captainName)}<br><small>${escapeHtml(r.iglUid || r.players?.[0]?.uid || "")}</small></td>
-          <td>${playerListHtml(r)}</td>
-          <td>${escapeHtml(r.whatsapp)}</td>
-          <td>${formatEntryFee(r.fee)}</td>
-          <td>${escapeHtml(r.paymentRef || "-")}</td>
-          <td>${escapeHtml(r.submittedAtDisplay || "-")}</td>
-        </tr>`).join("")}</tbody></table></div>`;
-      bindAdminSlotSelects(regs);
-      $$('[data-reg-action]', regs).forEach((button) => {
-        button.addEventListener("click", () => updateRegistrationStatus(button.dataset.regId, button.dataset.regAction));
-      });
-      $$('[data-reg-edit]', regs).forEach((button) => button.addEventListener("click", () => openRegistrationEditor(button.dataset.regEdit)));
-      $$('[data-reg-delete]', regs).forEach((button) => button.addEventListener("click", () => deleteRegistration(button.dataset.regDelete)));
-    }
-  }
   renderAdminCalendar(ADMIN_REGISTRATIONS);
+  renderAdminRegistrationsTable(ADMIN_REGISTRATIONS, activeAdminDate());
+  renderFinalScoreTable();
   renderLeaderboards("#admin-br-preview", "br");
   renderLeaderboards("#admin-cs-preview", "cs");
 }
@@ -2456,10 +2551,12 @@ function populateEditModalSlotOptions(reg, selectedRoomId, preferredSlot) {
   const room = getRoom(selectedRoomId || reg?.roomId);
   const capacity = Number(room?.capacity || reg?.slotCapacity || 12);
   const activeSlot = Number(preferredSlot || (String(selectedRoomId) === String(reg?.roomId) ? reg?.slotNumber : 1) || 1);
+  const regDate = registrationDateKey(reg);
   slotSelect.innerHTML = Array.from({ length: capacity }, (_, index) => {
     const slot = index + 1;
     const occupant = (ADMIN_REGISTRATIONS || []).find((item) =>
       String(item.id) !== String(reg?.id)
+      && registrationDateKey(item) === regDate
       && String(item.roomId) === String(selectedRoomId)
       && String(item.status || "Pending").toLowerCase() !== "rejected"
       && Number(item.slotNumber) === slot
@@ -2477,8 +2574,31 @@ function openRegistrationEditor(registrationId) {
   const reg = ADMIN_REGISTRATIONS.find((item) => String(item.id) === String(registrationId));
   if (!reg) return toast("Registration not found.", true);
   EDITING_REGISTRATION_ID = String(reg.id);
+  const form = $("#edit-registration-form");
   const teamField = $("#edit-team-name");
-  const roomSelect = $("#edit-room-id");
+  let roomSelect = $("#edit-room-id");
+  let slotSelect = $("#edit-slot-number");
+  if (form && (!roomSelect || !slotSelect)) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "field-grid";
+    wrapper.style.marginBottom = "12px";
+    wrapper.innerHTML = `
+      <label>Assigned lobby / room
+        <select id="edit-room-id"></select>
+      </label>
+      <label>Assigned slot number
+        <select id="edit-slot-number"></select>
+      </label>
+    `;
+    const listNode = $("#edit-player-list");
+    if (listNode && listNode.parentNode === form) {
+      form.insertBefore(wrapper, listNode);
+    } else {
+      form.prepend(wrapper);
+    }
+    roomSelect = $("#edit-room-id");
+    slotSelect = $("#edit-slot-number");
+  }
   const list = $("#edit-player-list");
   if (teamField) teamField.value = reg.teamName || "";
   if (roomSelect) {
@@ -2580,6 +2700,8 @@ function handleAdminResultDateChange() {
   ADMIN_CALENDAR_SELECTED_DATE = value;
   const monthInput = $("#registration-calendar-month");
   if (monthInput && value.length >= 7 && monthInput.value !== value.slice(0, 7)) monthInput.value = value.slice(0, 7);
+  renderAdminSummaryCards(computeDateSummaryStats(ADMIN_REGISTRATIONS, ADMIN_CALENDAR_SELECTED_DATE));
+  renderAdminRegistrationsTable(ADMIN_REGISTRATIONS, ADMIN_CALENDAR_SELECTED_DATE);
   renderAdminCalendar(ADMIN_REGISTRATIONS);
   renderFinalScoreTable();
 }
@@ -2588,12 +2710,13 @@ function renderFinalScoreTable() {
   const box = $("#final-score-table");
   if (!box) return;
   const dateInput = $("#admin-result-date");
-  if (dateInput && !dateInput.value) dateInput.value = todayDateIST();
-  const matchDate = dateInput?.value || todayDateIST();
+  if (dateInput && !dateInput.value) dateInput.value = activeAdminDate();
+  const matchDate = dateInput?.value || activeAdminDate();
   const history = ADMIN_SUMMARY?.matchHistory || [];
-  const approved = ADMIN_REGISTRATIONS.filter((reg) => String(reg.status || "").toLowerCase() === "approved").sort((a, b) => String(a.roomId || "").localeCompare(String(b.roomId || "")) || Number(a.slotNumber || 99) - Number(b.slotNumber || 99));
+  const dateRegistrations = registrationsForDate(ADMIN_REGISTRATIONS, matchDate);
+  const approved = dateRegistrations.filter((reg) => String(reg.status || "").toLowerCase() === "approved").sort((a, b) => String(a.roomId || "").localeCompare(String(b.roomId || "")) || Number(a.slotNumber || 99) - Number(b.slotNumber || 99));
   if (!approved.length) {
-    box.innerHTML = `<div class="empty-state"><h3>No approved teams to score yet</h3><p>Approve registrations above. Each approved entry will appear here with the correct match-result controls.</p></div>`;
+    box.innerHTML = `<div class="empty-state"><h3>No approved teams to score for ${escapeHtml(formatIsoDate(matchDate))}</h3><p>Approve registrations for this date above, or select a specific match date on the Registration Calendar.</p></div>`;
     return;
   }
   const rows = approved.map((reg) => {
@@ -2621,9 +2744,10 @@ function renderFinalScoreTable() {
 
 async function saveFinalScores() {
   if (!ADMIN_REGISTRATIONS.length) return toast("No registrations loaded.", true);
-  const approved = ADMIN_REGISTRATIONS.filter((reg) => String(reg.status || "").toLowerCase() === "approved");
+  const matchDate = $("#admin-result-date")?.value || activeAdminDate();
+  const dateRegistrations = registrationsForDate(ADMIN_REGISTRATIONS, matchDate);
+  const approved = (dateRegistrations.length ? dateRegistrations : ADMIN_REGISTRATIONS).filter((reg) => String(reg.status || "").toLowerCase() === "approved");
   if (!approved.length) return toast("Approve at least one registration first.", true);
-  const matchDate = $("#admin-result-date")?.value || todayDateIST();
   const parsedMatchDate = new Date(`${matchDate}T12:00:00+05:30`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(matchDate) || Number.isNaN(parsedMatchDate.getTime()) || parsedMatchDate.toISOString().slice(0, 10) !== matchDate) return toast("Choose a valid match date.", true);
   const results = [];
@@ -2766,8 +2890,11 @@ async function updateRegistrationStatus(registrationId, status) {
 function renderAdminSummaryCards(summary) {
   const box = $("#admin-live-summary");
   if (!box || !summary) return;
+  const today = todayDateIST();
+  const dateKey = summary.summaryDate || activeAdminDate();
+  const dateSuffix = dateKey === today ? " (Today)" : ` (${escapeHtml(formatIsoDate(dateKey))})`;
   box.innerHTML = `
-    <article><strong>${summary.totalEntries || 0}</strong><span>Total registrations</span></article>
+    <article><strong>${summary.totalEntries || 0}</strong><span>Total registrations${dateSuffix}</span></article>
     <article><strong>${summary.pendingEntries || 0}</strong><span>Pending approval</span></article>
     <article><strong>${summary.approvedEntries || 0}</strong><span>Approved entries/teams</span></article>
     <article><strong>${summary.approvedPlayers || 0}</strong><span>Approved players</span></article>
