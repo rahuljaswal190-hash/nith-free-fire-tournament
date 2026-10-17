@@ -199,8 +199,19 @@ function loadPaymentBackup() {
   }
 }
 
+function clearPaymentBackup() {
+  try {
+    localStorage.removeItem(PAYMENT_BACKUP_KEY);
+  } catch {
+    // Ignore localStorage access errors.
+  }
+}
+
 function savePaymentBackup(payment) {
-  if (!hasPaymentDetails(payment)) return;
+  if (!hasPaymentDetails(payment)) {
+    clearPaymentBackup();
+    return;
+  }
   try {
     localStorage.setItem(PAYMENT_BACKUP_KEY, JSON.stringify({
       payeeName: clean(payment.payeeName),
@@ -1008,6 +1019,18 @@ function todayDateIST() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function dateKeyFromTimestamp(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw : `${raw}Z`;
+  const dateValue = new Date(normalized);
+  if (Number.isNaN(dateValue.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(dateValue);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 function stableLocalEntryKey(value) {
   let hash = 2166136261;
   for (const character of String(value || "")) {
@@ -1107,7 +1130,7 @@ function getApprovedTeamRows(mode) {
       lastMatchScore: reg.brMatches?.slice().reverse().find((match) => match && match.score !== null && match.score !== undefined)?.score ?? null,
       csRoundDiff: reg.csResult?.roundDiff ?? null,
       finalScore: reg.finalScore,
-      matchDate: reg.scoreUpdatedAt ? String(reg.scoreUpdatedAt).slice(0, 10) : ""
+      matchDate: dateKeyFromTimestamp(reg.scoreUpdatedAt)
     }));
   }
   return teams.filter((row) => row.mode === mode || (mode === "br" && row.modeLabel === "Battle Royale") || (mode === "cs" && row.modeLabel === "Clash Squad"));
@@ -1641,7 +1664,7 @@ function updateAdminStorageStatus(info) {
   const path = info.path ? ` (${info.path})` : "";
   if (info.backend === "unconfigured") {
     node.className = "storage-status warning";
-    node.textContent = "Vercel requires a persistent MongoDB backend. Set MONGODB_URI in Vercel Environment Variables; local function storage is not durable and will not be used.";
+    node.textContent = "MongoDB is required for durable Vercel state. Set MONGODB_URI and TOURNAMENT_REQUIRE_MONGODB=1; otherwise the current code may use ephemeral /tmp JSON.";
     return;
   }
   if (info.backend === "mongodb") {
@@ -1874,20 +1897,57 @@ function renderAdminCalendar(registrations = []) {
     });
   }
 }
-function updatePaymentPersistenceStatus(payment = {}, storageInfo = null) {
+function updatePaymentPersistenceStatus(payment = {}, storageInfo = null, { localBackup = false } = {}) {
   const statusEl = $("#payment-persistence-status");
   if (!statusEl) return;
+  if (localBackup) {
+    statusEl.textContent = "Payment values were recovered from this browser's local backup; they are not confirmed in server storage yet.";
+    return;
+  }
+  if (!storageInfo) {
+    statusEl.textContent = "Storage type is not confirmed. Check the Admin storage status before relying on payment settings across deployments.";
+    return;
+  }
+
   const active = hasPaymentDetails(payment);
-  const backend = storageInfo?.backend === "mongodb" ? "MongoDB Atlas" : "server storage";
-  if (active) {
-    const parts = [];
-    if (clean(payment.upiId)) parts.push(`UPI: ${clean(payment.upiId)}`);
-    if (clean(payment.payeeName)) parts.push(`Payee: ${clean(payment.payeeName)}`);
-    if (clean(payment.qrDataUrl)) parts.push("QR image saved");
-    const stamp = payment.updatedAt ? ` · Last saved ${new Date(payment.updatedAt).toLocaleString("en-IN")}` : "";
-    statusEl.textContent = `Saved in ${backend} (${parts.join(" · ")})${stamp}. Persists automatically across all Vercel redeployments.`;
+  const details = [];
+  if (clean(payment.upiId)) details.push(`UPI: ${clean(payment.upiId)}`);
+  if (clean(payment.payeeName)) details.push(`Payee: ${clean(payment.payeeName)}`);
+  if (clean(payment.qrDataUrl)) details.push("QR image saved");
+  const detailLabel = details.length ? ` (${details.join(" · ")})` : "";
+  const stamp = payment.updatedAt ? ` · Last saved ${new Date(payment.updatedAt).toLocaleString("en-IN")}` : "";
+
+  if (storageInfo.backend === "unconfigured") {
+    statusEl.textContent = "MongoDB is required for durable Vercel payment settings. Configure MONGODB_URI and TOURNAMENT_REQUIRE_MONGODB=1; otherwise the current code may use ephemeral /tmp JSON.";
+    return;
+  }
+
+  if (storageInfo.backend === "mongodb") {
+    if (!storageInfo.connected) {
+      statusEl.textContent = "MongoDB is configured but the connection is not confirmed; persistence of payment settings cannot be verified.";
+    } else if (active) {
+      statusEl.textContent = `Saved in MongoDB Atlas${detailLabel}${stamp}. Settings remain across Vercel redeployments until an admin changes or removes them.`;
+    } else {
+      statusEl.textContent = "No payment details are published. When saved, they will be stored in MongoDB Atlas and remain across Vercel redeployments until changed or removed.";
+    }
+    return;
+  }
+
+  if (storageInfo.backend === "vercel-tmp-json") {
+    statusEl.textContent = active
+      ? `Saved in Vercel JSON storage${detailLabel}${stamp}, but this /tmp-based store is ephemeral and may be lost. Configure MongoDB and TOURNAMENT_REQUIRE_MONGODB=1 for durable state.`
+      : "No payment details are published. Vercel is using ephemeral JSON storage; configure MongoDB and TOURNAMENT_REQUIRE_MONGODB=1 for durable state.";
+    return;
+  }
+
+  if (storageInfo.mounted) {
+    statusEl.textContent = active
+      ? `Saved in server storage${detailLabel}${stamp}. It remains available as long as the host preserves this mounted volume.`
+      : "No payment details are published. When saved, they will use the detected mounted volume; confirm that the host preserves it.";
   } else {
-    statusEl.textContent = `Saved in ${backend} once published — your UPI ID, payee name, note, and QR code persist automatically across all Vercel redeployments.`;
+    statusEl.textContent = active
+      ? `Saved in server JSON storage${detailLabel}${stamp}, but persistence across restarts/redeployments is not confirmed.`
+      : "No payment details are published. Server JSON persistence depends on the host's actual storage; a data-directory setting alone is not a guarantee.";
   }
 }
 
@@ -1903,16 +1963,23 @@ function populateAdminSettingsFromSummary(summary = {}) {
   });
   const serverPayment = summary.paymentSettings || loadState().paymentSettings || {};
   let payment = serverPayment;
+  let paymentFromLocalBackup = false;
   if (hasPaymentDetails(serverPayment)) {
     savePaymentBackup(serverPayment);
+  } else if (serverPayment.updatedAt) {
+    // An explicit empty server update means an admin removed the settings; do not resurrect a stale browser copy.
+    clearPaymentBackup();
   } else {
     const backup = loadPaymentBackup();
     if (hasPaymentDetails(backup)) {
       payment = backup;
+      paymentFromLocalBackup = true;
       if (!paymentAutoRestored && SERVER_AVAILABLE && currentAdminCsrf) {
         paymentAutoRestored = true;
         apiPost("/api/admin/payment-settings", { settings: backup })
-          .then(() => refreshStateFromServer())
+          .then(async () => {
+            if (await refreshStateFromServer()) await renderAdminTables();
+          })
           .catch(() => {});
       }
     }
@@ -1922,7 +1989,7 @@ function populateAdminSettingsFromSummary(summary = {}) {
   if ($("#payment-note")) $("#payment-note").value = payment.note || "";
   PAYMENT_QR_DATA = payment.qrDataUrl || "";
   setQrPreview("payment", PAYMENT_QR_DATA);
-  updatePaymentPersistenceStatus(payment, summary.storageInfo);
+  updatePaymentPersistenceStatus(payment, summary.storageInfo, { localBackup: paymentFromLocalBackup });
   const boardView = $("#leaderboard-default-view");
   if (boardView) boardView.value = summary.leaderboardSettings?.defaultView === "all" ? "all" : "latest";
   updateAdminStorageStatus(summary.storageInfo);
@@ -2490,7 +2557,7 @@ async function savePaymentSettings() {
       await refreshStateFromServer();
       await renderAdminTables();
       $$('[data-registration-form]').forEach(renderPaymentInstructions);
-      showAdminConfirmation("Payment settings saved in MongoDB (persists across redeployments)");
+      showAdminConfirmation("Payment settings saved");
       return;
     }
     const state = loadState();
@@ -2695,6 +2762,63 @@ async function deleteRegistration(registrationId) {
   }
 }
 
+async function deleteMatchResult(registrationId, matchDate) {
+  const reg = ADMIN_REGISTRATIONS.find((item) => String(item.id) === String(registrationId));
+  if (!reg) return toast("Registration not found.", true);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(matchDate || ""))) return toast("Choose a valid match date.", true);
+  const dateLabel = formatIsoDate(matchDate);
+  const entryLabel = reg.teamName || "this entry";
+  if (!confirm(`Remove ${entryLabel}'s leaderboard result for ${dateLabel}? This deletes only this entry's result for the selected date. The registration and results from all other dates will be kept.`)) return;
+  try {
+    if (SERVER_AVAILABLE && currentAdminCsrf) {
+      await apiPost("/api/admin/delete-match-result", { registrationId, matchDate });
+      if (!await refreshStateFromServer()) throw new Error(LAST_SERVER_ERROR || "The result was removed, but the latest state could not be refreshed. Reload the admin panel.");
+    } else {
+      const state = loadState();
+      const id = String(registrationId);
+      const history = Array.isArray(state.matchHistory) ? state.matchHistory : [];
+      const matchingRows = history.filter((row) => String(row.registrationId || "") === id && row.date === matchDate);
+      const localReg = (state.registrations || []).find((item) => String(item.id) === id);
+      const legacyOnly = !matchingRows.length && localReg
+        && dateKeyFromTimestamp(localReg.scoreUpdatedAt) === matchDate
+        && localReg.finalScore !== null && localReg.finalScore !== undefined;
+      if (!matchingRows.length && !legacyOnly) throw new Error("No saved result was found for this entry on the selected date.");
+      const priorDates = history
+        .filter((row) => String(row.registrationId || "") === id && /^\d{4}-\d{2}-\d{2}$/.test(String(row.date || "")))
+        .map((row) => row.date);
+      const latestPriorDate = priorDates.reduce((latest, date) => date > latest ? date : latest, "");
+      const wasLatestDate = !latestPriorDate || matchDate >= latestPriorDate;
+      const currentScoreStamp = String(localReg?.scoreUpdatedAt || "");
+      const selectedResultIsCurrent = Boolean(currentScoreStamp && matchingRows.some((row) => String(row.scoreUpdatedAt || "") === currentScoreStamp));
+      const shouldSyncRegistration = Boolean(legacyOnly || (matchingRows.length && (selectedResultIsCurrent || (!currentScoreStamp && wasLatestDate))));
+      state.matchHistory = history.filter((row) => !(String(row.registrationId || "") === id && row.date === matchDate));
+      if (localReg && shouldSyncRegistration) {
+        const remaining = state.matchHistory.filter((row) => String(row.registrationId || "") === id && /^\d{4}-\d{2}-\d{2}$/.test(String(row.date || "")));
+        if (remaining.length) {
+          const latest = remaining.reduce((current, row) => !current || String(row.date) > String(current.date) ? row : current, null);
+          if ((latest.mode || localReg.mode) === "cs") {
+            localReg.csResult = latest.csResult && typeof latest.csResult === "object" ? latest.csResult : {};
+            delete localReg.brMatches;
+          } else {
+            localReg.brMatches = Array.isArray(latest.brMatches) ? latest.brMatches : [];
+            delete localReg.csResult;
+          }
+          localReg.finalScore = latest.finalScore;
+          if (latest.scoreUpdatedAt) localReg.scoreUpdatedAt = latest.scoreUpdatedAt;
+          else delete localReg.scoreUpdatedAt;
+        } else {
+          ["brMatches", "csResult", "finalScore", "scoreUpdatedAt", "lastMatchScore"].forEach((key) => delete localReg[key]);
+        }
+      }
+      saveState(state);
+    }
+    await renderAdminTables();
+    showAdminConfirmation("Selected date's leaderboard result removed");
+  } catch (error) {
+    toast(error.message || "Could not remove this date's leaderboard result.", true);
+  }
+}
+
 function handleAdminResultDateChange() {
   const value = $("#admin-result-date")?.value || todayDateIST();
   ADMIN_CALENDAR_SELECTED_DATE = value;
@@ -2714,7 +2838,11 @@ function renderFinalScoreTable() {
   const matchDate = dateInput?.value || activeAdminDate();
   const history = ADMIN_SUMMARY?.matchHistory || [];
   const dateRegistrations = registrationsForDate(ADMIN_REGISTRATIONS, matchDate);
-  const approved = dateRegistrations.filter((reg) => String(reg.status || "").toLowerCase() === "approved").sort((a, b) => String(a.roomId || "").localeCompare(String(b.roomId || "")) || Number(a.slotNumber || 99) - Number(b.slotNumber || 99));
+  const dateResultRegistrationIds = new Set(history.filter((item) => item.date === matchDate).map((item) => String(item.registrationId || "")));
+  const dateRegistrationIds = new Set(dateRegistrations.map((item) => String(item.id || "")));
+  const approved = ADMIN_REGISTRATIONS.filter((reg) => String(reg.status || "").toLowerCase() === "approved"
+    && (dateRegistrationIds.has(String(reg.id)) || dateResultRegistrationIds.has(String(reg.id))))
+    .sort((a, b) => String(a.roomId || "").localeCompare(String(b.roomId || "")) || Number(a.slotNumber || 99) - Number(b.slotNumber || 99));
   if (!approved.length) {
     box.innerHTML = `<div class="empty-state"><h3>No approved teams to score for ${escapeHtml(formatIsoDate(matchDate))}</h3><p>Approve registrations for this date above, or select a specific match date on the Registration Calendar.</p></div>`;
     return;
@@ -2722,7 +2850,7 @@ function renderFinalScoreTable() {
   const rows = approved.map((reg) => {
     const mode = reg.mode || (String(reg.roomId || "").startsWith("CS-") ? "cs" : "br");
     const saved = history.find((item) => String(item.registrationId) === String(reg.id) && item.date === matchDate);
-    const legacyCurrent = !saved && String(reg.scoreUpdatedAt || "").slice(0, 10) === matchDate ? reg : null;
+    const legacyCurrent = !saved && dateKeyFromTimestamp(reg.scoreUpdatedAt) === matchDate ? reg : null;
     const resultSource = saved || legacyCurrent || {};
     const brMatches = Array.isArray(resultSource.brMatches) ? resultSource.brMatches : [];
     const csResult = resultSource.csResult || {};
@@ -2736,10 +2864,15 @@ function renderFinalScoreTable() {
       })].join("");
       return `<fieldset class="br-match-input"><legend>Match ${index + 1}</legend><label>Kills<input class="score-input" type="number" min="0" max="99" step="1" inputmode="numeric" data-match-kills="${escapeHtml(reg.id)}" data-match-index="${index}" value="${match.kills ?? ""}" aria-label="Kills in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}" /></label><label>Placement<select data-match-position="${escapeHtml(reg.id)}" data-match-index="${index}" aria-label="Placement in match ${index + 1} for ${escapeHtml(reg.teamName || "team")}">${positionOptions}</select></label></fieldset>`;
     }).join("")}</div>` : `<div class="cs-score-editor"><label>Match result<select data-cs-outcome="${escapeHtml(reg.id)}"><option value="" ${!csResult.outcome ? "selected" : ""}>Not entered</option><option value="Win" ${csResult.outcome === "Win" ? "selected" : ""}>Win · 3 points</option><option value="Loss" ${csResult.outcome === "Loss" ? "selected" : ""}>Loss · 0 points</option></select></label><label>Round difference<input class="score-input" type="number" min="-99" max="99" step="1" data-cs-round-diff="${escapeHtml(reg.id)}" value="${csResult.roundDiff ?? ""}" placeholder="e.g. 3 or -2" /></label></div>`;
-    const datePoints = saved || legacyCurrent ? (resultSource.finalScore ?? "—") : "—";
-    return `<tr><td><b>${slotLabel(reg)}</b></td><td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(registrationFormatLabel(reg) || reg.variant || "-")}<br><small>${escapeHtml(reg.scheduleTime || "")}</small></td><td>${resultControl}</td><td><b>${escapeHtml(datePoints)}</b></td></tr>`;
+    const hasDateResult = Boolean(saved || legacyCurrent);
+    const datePoints = hasDateResult ? (resultSource.finalScore ?? "—") : "—";
+    const removeAction = hasDateResult
+      ? `<button class="btn small ghost danger" type="button" data-result-delete="${escapeHtml(reg.id)}" data-result-date="${escapeHtml(matchDate)}" aria-label="Remove saved leaderboard result for ${escapeHtml(reg.teamName || "entry")} on ${escapeHtml(formatIsoDate(matchDate))}">Remove result</button>`
+      : `<span aria-label="No saved result">—</span>`;
+    return `<tr><td><b>${slotLabel(reg)}</b></td><td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(registrationFormatLabel(reg) || reg.variant || "-")}<br><small>${escapeHtml(reg.scheduleTime || "")}</small></td><td>${resultControl}</td><td><b>${escapeHtml(datePoints)}</b></td><td>${removeAction}</td></tr>`;
   }).join("");
-  box.innerHTML = `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Slot</th><th>Entry / roster</th><th>Mode · time</th><th>Verified result inputs · ${escapeHtml(formatIsoDate(matchDate))}</th><th>Date points</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  box.innerHTML = `<div class="table-wrap" tabindex="0" role="region" aria-label="Scrollable data table"><table><thead><tr><th>Slot</th><th>Entry / roster</th><th>Mode · time</th><th>Verified result inputs · ${escapeHtml(formatIsoDate(matchDate))}</th><th>Date points</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  $$('[data-result-delete]', box).forEach((button) => button.addEventListener("click", () => deleteMatchResult(button.dataset.resultDelete, button.dataset.resultDate)));
 }
 
 async function saveFinalScores() {

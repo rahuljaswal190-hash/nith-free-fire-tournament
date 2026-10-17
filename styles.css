@@ -1508,7 +1508,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,0.028); }
   .reveal, .reveal.reveal-pending, .reveal.reveal-visible { opacity: 1; transform: none; animation: none; transition: none; }
 }
 
-/* Final Update 2.3: native Apple-system type and calmer, consistent motion. */
+/* Final Update 2.10: native Apple-system type and calmer, consistent motion. */
 :root {
   --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
   --motion-smooth: cubic-bezier(.22,.61,.36,1);

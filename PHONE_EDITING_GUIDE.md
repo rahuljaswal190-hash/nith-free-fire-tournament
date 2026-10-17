@@ -4,7 +4,7 @@ The admin panel requires the live Python API. There is no default PIN or offline
 
 ## Deploy this project on Vercel
 
-The repo is configured for Vercel static hosting plus one Python Function. Vercel serves `public/` as the website and sends `/api/*` to `api/dispatch.py`. Keep the project root at the repository root; do **not** set the Vercel root directory to `public/`.
+This GitHub repository is intentionally flat: website HTML/CSS/JS, `server.py`, `dispatch.py`, `requirements.txt`, and `vercel.json` are all at the repository root. There are no `public/` or `api/` project subfolders. Vercel builds the listed root static files and routes `/api/*` to the root-level `dispatch.py` Python Function; keep the repository root as the Vercel project root.
 
 ### Before switching traffic
 
@@ -16,7 +16,8 @@ The repo is configured for Vercel static hosting plus one Python Function. Verce
 
 In Vercel Project Settings → Environment Variables, add the following privately for Production (and Preview if you need to test there):
 
-- `MONGODB_URI` — required on Vercel. Without it, state reads and writes fail closed with HTTP 503; the function will not use ephemeral local files as a database.
+- `MONGODB_URI` — configure this for durable state on Vercel. If it is configured but unavailable, state requests return HTTP 503 without local fallback.
+- `TOURNAMENT_REQUIRE_MONGODB=1` — set this Vercel-only safeguard so missing `MONGODB_URI` fails closed. Without the flag, the current code uses JSON under ephemeral `/tmp` when the URI is unset; that is not persistent storage.
 - `TOURNAMENT_ADMIN_PIN` — use a long, unique passphrase, not a short four-digit value.
 - `TOURNAMENT_SESSION_SECRET` — Vercel's signed admin cookies require a random secret at least 32 characters long. Generate one locally with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`; add the result directly in Vercel, and do not paste it into source or chat.
 - Optional `MONGODB_DATABASE` and `MONGODB_COLLECTION` — defaults are `nith_free_fire_db` and `tournament_state`.
@@ -25,23 +26,23 @@ Keep the MongoDB user least-privileged and configure provider network access for
 
 ### Deploy and verify
 
-1. Import/connect the repository in Vercel or deploy the repository root with the Vercel CLI. The checked-in `vercel.json` sets `public/` as static output and routes the API; no front-end build command is needed.
-2. After deployment, open the homepage and test `/api/state`. If MongoDB is not configured or reachable, the API correctly returns 503 rather than silently storing data in temporary files.
+1. Import/connect the repository in Vercel or deploy the repository root with the Vercel CLI. The checked-in `vercel.json` builds the root-level static files and routes API requests to `dispatch.py`; no front-end build command is needed.
+2. After deployment, open the homepage and test `/api/state`. Configure `MONGODB_URI` and set `TOURNAMENT_REQUIRE_MONGODB=1`. With that flag, a missing URI fails closed; a configured but unreachable database returns 503. Without the flag and URI, the current code can use ephemeral `/tmp` JSON, which is not suitable for durable tournament state.
 3. Test one paid and one free registration, admin PIN sign-in, session restoration, a lobby fee change, registration refresh/approval, payment settings, room release, and result publishing.
 4. If the previous host had local-only JSON, keep it intact until the complete migration and post-deploy checks are verified. Do not use the browser State JSON transfer as the migration source.
 
-Vercel's serverless instances can scale independently. Admin sessions use signed 8-hour cookies so they work across instances. The lightweight API/IP rate limits are still process-local and are not a distributed rate-limiting service; enable available edge/bot protections for a public panel. The state is stored as one MongoDB document, so concurrent writes may race; keep backups and verify critical admin edits.
+Vercel's serverless instances can scale independently. Admin sessions use signed 8-hour cookies so they work across instances. The lightweight API/IP rate limits are still process-local and are not a distributed rate-limiting service; enable available edge/bot protections for a public panel. When MongoDB is configured, state is stored as one document, so concurrent writes may race; keep backups and verify critical admin edits.
 
 ## Admin controls from your phone
 
-1. Open `/admin.html`, enter the private PIN, and sign in. Do not store the PIN in the page source or in `public/data.js`.
+1. Open `/admin.html`, enter the private PIN, and sign in. Do not store the PIN in the page source or in `data.js`.
 2. **Set match timings:** set BR and CS start times independently, choose a duration of 1 or 2 hours, and a 0/1/2-hour gap. There are exactly three linked time slots per mode. Each BR slot has 3 matches; each CS slot has 1 match. Time choices are shown in IST.
 3. **Set individual lobby fees:** in **Set entry fee for each lobby**, select BR or CS, format/team size, CS type where relevant, and time slot. Choose the specific lobby and set its fee to Free or ₹10–₹110 in ₹10 steps. Fees save to MongoDB-backed server state. New registrations use the updated fee; existing entries retain the amount already recorded. Free registrations do not require a payment reference.
-4. **Publish payment details:** upload an optional payment QR and/or enter a payee name and UPI ID. Registrants see payment instructions for paid lobbies; free lobbies show that no payment is due.
+4. **Publish payment details:** upload an optional payment QR and/or enter a payee name and UPI ID. Registrants see payment instructions for paid lobbies; free lobbies show that no payment is due. Use the storage status below the payment controls to confirm persistence. To remove all details, clear the fields and QR, then publish the empty settings.
 5. **Verify and approve:** inspect the submitted UTR/reference manually, then approve or reject. There is no payment gateway or automatic payment verification; QR payment does not change a pending status by itself.
 6. **View/retrieve registrations:** on `/admin.html`, scroll to **Registrations & approvals** and tap **Refresh registrations**. The table fetches current authenticated server data and shows roster/contact/payment references. Use **Approve** or **Reject** after review. The dashboard has a read-only registrations table and its own refresh button. ₹0 approved-entry cards do not mean there are no pending registrations.
 7. **Correct names:** tap **Edit names** in a registration row. Update team/entry and player IGN names (emoji and symbols are supported); uncheck a teammate to remove them. Use **Remove** to delete a registration and free its lobby slot.
-8. **Use the calendar and enter results:** select a month and tap any date, including an empty date, to inspect registration/results and set the match date. Approve entries first. For BR, enter kills and placement for all three matches; for CS, choose Win/Loss and enter round difference. Tap **Save Match Results** to archive that date.
+8. **Use the calendar and manage dated results:** select a month and tap any date, including an empty date, to inspect registration/results and set the match date. Approve entries first. For BR, enter kills and placement for all three matches; for CS, choose Win/Loss and enter round difference. Tap **Save Match Results** to archive that date. To remove a saved result, use the entry's **Remove result** button and confirm; only that entry's result for the selected date is deleted, while the registration and results from all other dates remain.
 9. **Release or remove room access:** choose the correct mode, format/team size, current fee and type, then enter a custom room ID/password and optional QR. Details remain hidden until the lobby is full unless **Force release** is selected. **Remove Saved Room Details** deletes only the selected lobby credentials, not registrations.
 
 ## Formats and fees
@@ -57,8 +58,9 @@ Vercel's serverless instances can scale independently. Admin sessions use signed
 
 - Tournament state contains player IDs, contact numbers, payment references, room credentials, payment settings, and QR images. Keep complete backups encrypted/private. The browser State JSON transfer excludes registrations/payment settings and is not a recovery backup.
 - Store the rotated MongoDB URI, admin PIN, and Vercel session secret only in Vercel's protected Environment settings; never in `server.py`, `vercel.json`, public files, Git, or chat.
-- Vercel requires MongoDB for state. If the database is unavailable, writes return an error and do not fall back to temporary local files. Verify the admin storage message says MongoDB is connected.
+- For durable Vercel state, configure `MONGODB_URI` and `TOURNAMENT_REQUIRE_MONGODB=1`. Without the URI and flag, the code uses ephemeral `/tmp` JSON; with the flag but no URI, state operations fail closed. If a configured database is unavailable, writes return an error and do not fall back to local files. Verify the admin storage message says MongoDB is connected.
+- Payment settings and QR persist across deployments only when stored in a persistent backend such as the configured MongoDB database; there they remain until an admin changes or removes them.
 - Admin authentication uses environment-only secrets, short-lived signed sessions on Vercel, HttpOnly/SameSite/Secure cookies, CSRF checks, and same-origin API writes. Rate limits are process-local; sign out on shared devices and enable available Vercel edge protections.
-- The repository's `render.yaml` is retained only as a separate legacy configuration and remains on Render Free. It is not used by Vercel; no Render plan or disk change is part of this update.
+- The repository's `render.yaml` is retained only as a separate legacy configuration and remains on Render Free. It is not used by Vercel; no Render plan or disk change is part of this update. On Render Free, setting `TOURNAMENT_DATA_DIR` only changes the JSON path; it does not itself provide persistent storage.
 - Only released room credentials and intended public tournament/payment/leaderboard information are visible to visitors. Pending registration contact/payment details require an admin session.
 - Keep the event described as student-organized. Do not imply NIT Hamirpur, Garena, or Free Fire approval or endorsement.

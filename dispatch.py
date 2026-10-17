@@ -35,6 +35,7 @@ API_PATHS = frozenset({
     "/api/admin/payment-settings",
     "/api/admin/leaderboard-settings",
     "/api/admin/match-results",
+    "/api/admin/delete-match-result",
     "/api/admin/room-details",
     "/api/admin/delete-room-details",
 })

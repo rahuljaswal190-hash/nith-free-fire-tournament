@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Admin tools for timings, registration edits, QR payments, room details, and verified match results." />
-  <link rel="stylesheet" href="styles.css?v=20261012-final-update-2-3" />
+  <link rel="stylesheet" href="styles.css?v=20261017-final-update-2-10-result-delete" />
 </head>
 <body data-page="admin" id="top">
 <a class="skip-link" href="#main-content">Skip to content</a>
@@ -137,7 +137,7 @@
 
       <article class="admin-box full">
         <h2>Payment instructions for players</h2>
-        <p>Upload an optional payment QR and/or set a UPI ID. Players can use the QR or generated UPI link. The UTR/reference remains required, and payment still needs manual verification before approval. Saved payment details are stored in MongoDB and persist automatically across Vercel redeployments.</p>
+        <p>Upload an optional payment QR and/or set a UPI ID. Players can use the QR or generated UPI link. The UTR/reference remains required, and payment still needs manual verification before approval. Payment settings use the configured server storage. For durable Vercel storage, configure <code>MONGODB_URI</code> and <code>TOURNAMENT_REQUIRE_MONGODB=1</code>; without a MongoDB URI the current code may use ephemeral JSON. Clear the fields and remove the QR, then publish, to remove the payment details.</p>
         <div class="field-grid">
           <label>Payee / account name<input id="payment-payee" maxlength="100" placeholder="Organizer / account name" /></label>
           <label>UPI ID<input id="payment-upi-id" maxlength="120" placeholder="name@bank" /></label>
@@ -146,7 +146,7 @@
         <label>Payment QR image<input id="payment-qr-file" type="file" accept="image/png,image/jpeg,image/webp" /></label>
         <div id="payment-qr-preview-wrap" class="qr-preview-wrap hidden"><img id="payment-qr-preview" alt="Payment QR preview" /><button class="btn small ghost" id="clear-payment-qr" type="button">Remove QR</button></div>
         <div class="admin-actions"><button class="btn small" id="save-payment-settings" type="button">Publish Payment Instructions</button></div>
-        <p class="disclaimer" id="payment-persistence-status" role="status" aria-live="polite">Saved in MongoDB database — your UPI ID, payee name, note, and QR code persist automatically across all Vercel redeployments.</p>
+        <p class="disclaimer" id="payment-persistence-status" role="status" aria-live="polite">Storage status will appear after the authenticated admin summary loads.</p>
       </article>
 
       <article class="admin-box full">
@@ -175,7 +175,7 @@
         <h2>Enter verified match results</h2>
         <p>Select a date in the calendar above or use the date field. For each approved BR entry, enter kills and placement in all 3 matches; for CS, enter Win/Loss and round difference. Save to archive results for that date. Historical edits do not overwrite newer results.</p>
         <label class="result-date-control">Match date (IST)<input id="admin-result-date" type="date" /></label>
-        <p class="disclaimer">Results are archived by this date. Selecting an earlier date loads that day's saved values for correction without overwriting newer match results.</p>
+        <p class="disclaimer">Results are archived by this date. Selecting an earlier date loads that day's saved values for correction without overwriting newer match results. Use a row's <b>Remove result</b> action to delete only that entry's saved result for the selected date; its registration and results from other dates remain.</p>
         <div id="final-score-table"></div>
         <div class="admin-actions"><button class="btn small" id="save-final-scores" type="button">Save Match Results</button></div>
       </article>
@@ -215,7 +215,7 @@
           <li><b>Enter dated results:</b> choose any match date from the calendar or date field. BR uses kills and placement for three matches; CS uses Win/Loss and round difference. Previous dates remain archived when a newer date is saved.</li>
           <li><b>Set leaderboard default:</b> players can choose a saved date; select whether the page opens on latest match results or all-time totals.</li>
           <li><b>Use the calendar:</b> click any day, including an empty day. Registration and saved-result states are shown separately; the selected date also loads into result entry.</li>
-          <li><b>Keep storage durable:</b> host <code>server.py</code> on persistent storage and configure <code>TOURNAMENT_DATA_DIR</code>. Free ephemeral storage can be cleared on redeploy/restart; check the status notice above.</li>
+          <li><b>Keep storage durable:</b> for JSON, run <code>server.py</code> on an actual persistent mounted volume and point <code>TOURNAMENT_DATA_DIR</code> to it; a path setting alone does not create persistence. Render Free local storage can be cleared on redeploy/restart; check the status notice above.</li>
           <li><b>Manage room access:</b> save the custom Room ID/password and optional QR. Details remain hidden until full-room release or you force release; Remove Saved Room Details unpublishes and deletes those credentials without changing registrations.</li>
         </ol>
       </article>
@@ -248,7 +248,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261012-final-update-2-3"></script>
-<script src="site.js?v=20261012-final-update-2-3"></script>
+<script src="data.js?v=20261017-final-update-2-10-result-delete"></script>
+<script src="site.js?v=20261017-final-update-2-10-result-delete"></script>
 </body>
 </html>

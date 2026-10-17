@@ -239,6 +239,140 @@ class TournamentApiTests(unittest.TestCase):
         self.assertNotIn("registrationId", state["matchHistory"][0])
         self.assertNotIn("whatsapp", state["matchHistory"][0])
 
+    def test_delete_one_dated_result_keeps_registration_and_other_dates(self):
+        self.register_br()
+        self.register_br("BR-TEST-2", "BR-SOLO-20-1", "UTR-TEST-2")
+        for registration_id in ("BR-TEST-1", "BR-TEST-2"):
+            self.admin("/api/admin/registration-status", {"registrationId": registration_id, "status": "Approved"})
+        for match_date, kills in (("2026-10-07", 1), ("2026-10-08", 2)):
+            results = [{
+                "registrationId": "BR-TEST-1",
+                "matches": [
+                    {"kills": kills, "position": 1},
+                    {"kills": 0, "position": 12},
+                    {"kills": 0, "position": 12},
+                ],
+            }]
+            if match_date == "2026-10-07":
+                results.append({
+                    "registrationId": "BR-TEST-2",
+                    "matches": [
+                        {"kills": 3, "position": 1},
+                        {"kills": 0, "position": 12},
+                        {"kills": 0, "position": 12},
+                    ],
+                })
+            self.admin("/api/admin/match-results", {"matchDate": match_date, "results": results})
+
+        deleted = self.admin("/api/admin/delete-match-result", {
+            "registrationId": "BR-TEST-1", "matchDate": "2026-10-07",
+        })
+        self.assertEqual(deleted["removedRows"], 1)
+        remaining = {(row["registrationId"], row["date"]) for row in deleted["matchHistory"]}
+        self.assertEqual(remaining, {
+            ("BR-TEST-1", "2026-10-08"),
+            ("BR-TEST-2", "2026-10-07"),
+        })
+        registration = next(row for row in deleted["registrations"] if row["id"] == "BR-TEST-1")
+        self.assertEqual(registration["status"], "Approved")
+        self.assertEqual(registration["finalScore"], 14)
+        public_state = self.get_state()
+        self.assertEqual({row["date"] for row in public_state["matchHistory"]}, {"2026-10-07", "2026-10-08"})
+        self.assertEqual(len(public_state["matchHistory"]), 2)
+
+    def test_deleting_latest_result_restores_older_score_then_last_removal_clears_scores(self):
+        self.register_br()
+        self.admin("/api/admin/registration-status", {"registrationId": "BR-TEST-1", "status": "Approved"})
+        for match_date, kills in (("2026-10-07", 1), ("2026-10-08", 2)):
+            self.admin("/api/admin/match-results", {"matchDate": match_date, "results": [{
+                "registrationId": "BR-TEST-1",
+                "matches": [
+                    {"kills": kills, "position": 1},
+                    {"kills": 0, "position": 12},
+                    {"kills": 0, "position": 12},
+                ],
+            }]})
+
+        removed_latest = self.admin("/api/admin/delete-match-result", {
+            "registrationId": "BR-TEST-1", "matchDate": "2026-10-08",
+        })
+        registration = next(row for row in removed_latest["registrations"] if row["id"] == "BR-TEST-1")
+        self.assertEqual(registration["finalScore"], 13)
+        self.assertEqual([row["date"] for row in removed_latest["matchHistory"]], ["2026-10-07"])
+
+        removed_last = self.admin("/api/admin/delete-match-result", {
+            "registrationId": "BR-TEST-1", "matchDate": "2026-10-07",
+        })
+        registration = next(row for row in removed_last["registrations"] if row["id"] == "BR-TEST-1")
+        self.assertEqual(registration["id"], "BR-TEST-1")
+        self.assertNotIn("finalScore", registration)
+        self.assertNotIn("scoreUpdatedAt", registration)
+        self.assertNotIn("brMatches", registration)
+        self.assertEqual(removed_last["matchHistory"], [])
+
+    def test_deleting_older_history_keeps_current_score_when_its_stamp_is_different(self):
+        self.register_br()
+        self.admin("/api/admin/registration-status", {"registrationId": "BR-TEST-1", "status": "Approved"})
+        self.admin("/api/admin/match-results", {"matchDate": "2026-10-07", "results": [{
+            "registrationId": "BR-TEST-1",
+            "matches": [
+                {"kills": 1, "position": 1},
+                {"kills": 0, "position": 12},
+                {"kills": 0, "position": 12},
+            ],
+        }]})
+        state = server.load_state()
+        registration = next(row for row in state["registrations"] if row["id"] == "BR-TEST-1")
+        registration["finalScore"] = 77
+        registration["scoreUpdatedAt"] = "2026-10-08T12:00:00+00:00"
+        registration["brMatches"] = [{"kills": 77, "position": 1, "score": 90}]
+        server.save_state(state)
+
+        deleted = self.admin("/api/admin/delete-match-result", {
+            "registrationId": "BR-TEST-1", "matchDate": "2026-10-07",
+        })
+        registration = next(row for row in deleted["registrations"] if row["id"] == "BR-TEST-1")
+        self.assertEqual(registration["finalScore"], 77)
+        self.assertEqual(registration["scoreUpdatedAt"], "2026-10-08T12:00:00+00:00")
+        self.assertEqual(deleted["matchHistory"], [])
+
+    def test_delete_cs_result_keeps_registration_and_clears_only_that_result(self):
+        self.post("/api/register", {
+            "id": "CS-TEST-1", "mode": "cs", "modeLabel": "Clash Squad",
+            "variant": "Normal", "playersPerEntry": 4, "roomId": "CS-NM-50-2",
+            "roomTitle": "Normal Clash Squad Slot 2", "teamName": "CS Crew",
+            "iglName": "CS Captain", "players": [
+                {"ign": "CS Captain", "uid": "12345678"},
+                {"ign": "CS Player 2", "uid": "12345679"},
+                {"ign": "CS Player 3", "uid": "12345680"},
+                {"ign": "CS Player 4", "uid": "12345681"},
+            ],
+            "fee": 50, "paymentRef": "UTR-CS-1", "whatsapp": "+91 9876543210", "acceptedRules": True,
+        })
+        self.admin("/api/admin/registration-status", {"registrationId": "CS-TEST-1", "status": "Approved"})
+        self.admin("/api/admin/match-results", {"matchDate": "2026-10-09", "results": [{
+            "registrationId": "CS-TEST-1", "csResult": {"outcome": "Win", "roundDiff": 4},
+        }]})
+        deleted = self.admin("/api/admin/delete-match-result", {
+            "registrationId": "CS-TEST-1", "matchDate": "2026-10-09",
+        })
+        registration = next(row for row in deleted["registrations"] if row["id"] == "CS-TEST-1")
+        self.assertEqual(registration["status"], "Approved")
+        self.assertNotIn("finalScore", registration)
+        self.assertNotIn("csResult", registration)
+        self.assertEqual(deleted["matchHistory"], [])
+
+    def test_delete_result_requires_admin_and_validates_date_and_entry(self):
+        self.post("/api/admin/delete-match-result", {
+            "registrationId": "BR-TEST-1", "matchDate": "2026-10-07",
+        }, 401)
+        self.admin("/api/admin/delete-match-result", {
+            "registrationId": "BR-TEST-1", "matchDate": "2026-02-30",
+        }, 400)
+        self.admin("/api/admin/delete-match-result", {
+            "registrationId": "BR-TEST-1", "matchDate": "2026-10-07",
+        }, 404)
+
     def test_legacy_json_and_backup_files_are_not_served_as_static_files(self):
         old_root = server.ROOT
         old_data_file = server.DATA_FILE
@@ -703,6 +837,10 @@ class VercelCompatibilityTests(unittest.TestCase):
 
         target = dispatch_target("/dispatch.py?__nith_vercel_path=%2Fapi%2Fadmin%2Flobby-fee&x=one&x=two")
         self.assertEqual(target, "/api/admin/lobby-fee?x=one&x=two")
+        self.assertEqual(
+            dispatch_target("/dispatch.py?__nith_vercel_path=%2Fapi%2Fadmin%2Fdelete-match-result"),
+            "/api/admin/delete-match-result",
+        )
         self.assertEqual(
             dispatch_target("/dispatch.py?__nith_vercel_path=%2Fapi%2Fstate&path=state"),
             "/api/state",

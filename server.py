@@ -2008,6 +2008,84 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"ok": True, "message": f"Results for {match_date} saved to match history.", "state": public_state(state), **admin_summary(state)})
             return
 
+        if path == "/api/admin/delete-match-result":
+            registration_id = str(payload.get("registrationId") or "").strip()
+            match_date = str(payload.get("matchDate") or "").strip()
+            if not registration_id or len(registration_id) > 100:
+                self.send_json({"ok": False, "error": "Choose a valid registration entry."}, 400)
+                return
+            if not valid_match_date(match_date):
+                self.send_json({"ok": False, "error": "Choose a valid match date in YYYY-MM-DD format."}, 400)
+                return
+
+            history = state.setdefault("matchHistory", [])
+            matching_rows = [
+                row for row in history
+                if str(row.get("registrationId") or "") == registration_id and row.get("date") == match_date
+            ]
+            reg = next((item for item in state.get("registrations", []) if str(item.get("id") or "") == registration_id), None)
+            legacy_only = bool(
+                not matching_rows and reg
+                and match_date_from_timestamp(reg.get("scoreUpdatedAt")) == match_date
+                and reg.get("finalScore") is not None
+            )
+            if not matching_rows and not legacy_only:
+                self.send_json({"ok": False, "error": "No saved result was found for this entry on the selected date."}, 404)
+                return
+
+            dates_before_removal = [
+                row.get("date") for row in history
+                if str(row.get("registrationId") or "") == registration_id and valid_match_date(row.get("date"))
+            ]
+            was_latest_history_date = not dates_before_removal or match_date >= max(dates_before_removal)
+            current_score_stamp = str(reg.get("scoreUpdatedAt") or "") if reg else ""
+            selected_result_is_current = bool(
+                current_score_stamp
+                and any(str(row.get("scoreUpdatedAt") or "") == current_score_stamp for row in matching_rows)
+            )
+            should_sync_registration = bool(
+                legacy_only
+                or (matching_rows and (selected_result_is_current or (not current_score_stamp and was_latest_history_date)))
+            )
+
+            if matching_rows:
+                state["matchHistory"] = [
+                    row for row in history
+                    if not (str(row.get("registrationId") or "") == registration_id and row.get("date") == match_date)
+                ]
+
+            if reg and should_sync_registration:
+                remaining = [
+                    row for row in state.get("matchHistory", [])
+                    if str(row.get("registrationId") or "") == registration_id and valid_match_date(row.get("date"))
+                ]
+                if remaining:
+                    latest = max(remaining, key=lambda row: (str(row.get("date") or ""), str(row.get("scoreUpdatedAt") or "")))
+                    if room_mode(reg.get("roomId"), latest.get("mode")) == "cs":
+                        reg["csResult"] = latest.get("csResult") if isinstance(latest.get("csResult"), dict) else {}
+                        reg.pop("brMatches", None)
+                    else:
+                        reg["brMatches"] = latest.get("brMatches") if isinstance(latest.get("brMatches"), list) else []
+                        reg.pop("csResult", None)
+                    reg["finalScore"] = latest.get("finalScore")
+                    if latest.get("scoreUpdatedAt"):
+                        reg["scoreUpdatedAt"] = latest["scoreUpdatedAt"]
+                    else:
+                        reg.pop("scoreUpdatedAt", None)
+                else:
+                    for key in ("brMatches", "csResult", "finalScore", "scoreUpdatedAt", "lastMatchScore"):
+                        reg.pop(key, None)
+
+            save_state(state)
+            self.send_json({
+                "ok": True,
+                "message": "The selected date's leaderboard result was removed; the registration and other dates were kept.",
+                "removedRows": len(matching_rows) or 1,
+                "state": public_state(state),
+                **admin_summary(state),
+            })
+            return
+
         if path == "/api/admin/room-details":
             source = payload.get("detail")
             detail = source if isinstance(source, dict) else {}
