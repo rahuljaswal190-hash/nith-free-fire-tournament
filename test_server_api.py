@@ -791,6 +791,16 @@ class TournamentApiTests(unittest.TestCase):
         self.assertIn("refreshDashboardRegistrations", source)
         self.assertIn('apiPost("/api/admin/summary", {})', source)
 
+    def test_admin_has_prominent_selected_date_result_delete_control(self):
+        admin_html = (PUBLIC_DIR / "admin.html").read_text(encoding="utf-8")
+        source = (PUBLIC_DIR / "site.js").read_text(encoding="utf-8")
+        self.assertIn('id="admin-delete-result-registration"', admin_html)
+        self.assertIn('id="delete-selected-match-result"', admin_html)
+        self.assertIn("Delete Saved Leaderboard Result", admin_html)
+        self.assertIn("only that entry's result for the selected date", admin_html)
+        self.assertIn("function renderSavedResultDeletionControl", source)
+        self.assertIn('apiPost("/api/admin/delete-match-result", { registrationId, matchDate })', source)
+
     def test_static_file_allowlist_hides_source_config_docs_and_runtime_state(self):
         for path in ("/README.md", "/render.yaml", "/requirements.txt", "/server.py", "/dispatch.py", "/test_server_api.py", "/vercel.json", "/.vercelignore", "/.gitignore", "/.env", "/api/dispatch.py", "/tests/test_server_api.py", "/server-data.json", "/server-data.json.bak", "/%2e%2e/README.md"):
             with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as caught:

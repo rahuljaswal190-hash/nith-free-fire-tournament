@@ -2063,6 +2063,16 @@ function setupAdminListeners() {
   $("#save-room-count")?.addEventListener("click", saveAdminRoomCount);
   $("#save-final-scores")?.addEventListener("click", saveFinalScores);
   $("#admin-result-date")?.addEventListener("change", handleAdminResultDateChange);
+  $("#admin-delete-result-registration")?.addEventListener("change", (event) => {
+    const button = $("#delete-selected-match-result");
+    if (button) button.disabled = !String(event.target.value || "");
+  });
+  $("#delete-selected-match-result")?.addEventListener("click", () => {
+    const registrationId = $("#admin-delete-result-registration")?.value || "";
+    const matchDate = $("#admin-result-date")?.value || activeAdminDate();
+    if (!registrationId) return toast("Choose a saved result for the selected date first.", true);
+    deleteMatchResult(registrationId, matchDate);
+  });
   $("#save-leaderboard-settings")?.addEventListener("click", saveLeaderboardSettings);
   $("#refresh-registrations")?.addEventListener("click", refreshAdminRegistrations);
   $("#export-registrations")?.addEventListener("click", exportRegistrationsCsv);
@@ -2830,6 +2840,37 @@ function handleAdminResultDateChange() {
   renderFinalScoreTable();
 }
 
+function renderSavedResultDeletionControl(matchDate, history = ADMIN_SUMMARY?.matchHistory || []) {
+  const select = $("#admin-delete-result-registration");
+  const button = $("#delete-selected-match-result");
+  if (!select || !button) return;
+  const dateHistoryIds = new Set((Array.isArray(history) ? history : [])
+    .filter((item) => item && item.date === matchDate)
+    .map((item) => String(item.registrationId || ""))
+    .filter(Boolean));
+  const candidates = ADMIN_REGISTRATIONS.filter((reg) => {
+    const id = String(reg.id || "");
+    if (!id) return false;
+    if (dateHistoryIds.has(id)) return true;
+    return dateKeyFromTimestamp(reg.scoreUpdatedAt) === matchDate
+      && reg.finalScore !== null && reg.finalScore !== undefined;
+  }).sort((a, b) => String(a.teamName || "").localeCompare(String(b.teamName || ""))
+    || String(a.roomId || "").localeCompare(String(b.roomId || ""))
+    || String(a.id || "").localeCompare(String(b.id || "")));
+
+  const options = candidates.map((reg) => {
+    const id = String(reg.id || "");
+    const modeLabel = reg.modeLabel || (reg.mode === "cs" ? "Clash Squad" : "Battle Royale");
+    const slotLabelText = reg.slotNumber ? `Slot ${reg.slotNumber}` : `Entry ${id}`;
+    const label = [reg.teamName || "Unnamed entry", modeLabel, reg.roomId || "", slotLabelText].filter(Boolean).join(" · ");
+    return `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`;
+  }).join("");
+  select.innerHTML = `<option value="">${candidates.length ? "Choose an entry with a saved result" : "No saved results for selected date"}</option>${options}`;
+  select.value = "";
+  select.disabled = candidates.length === 0;
+  button.disabled = true;
+}
+
 function renderFinalScoreTable() {
   const box = $("#final-score-table");
   if (!box) return;
@@ -2837,6 +2878,7 @@ function renderFinalScoreTable() {
   if (dateInput && !dateInput.value) dateInput.value = activeAdminDate();
   const matchDate = dateInput?.value || activeAdminDate();
   const history = ADMIN_SUMMARY?.matchHistory || [];
+  renderSavedResultDeletionControl(matchDate, history);
   const dateRegistrations = registrationsForDate(ADMIN_REGISTRATIONS, matchDate);
   const dateResultRegistrationIds = new Set(history.filter((item) => item.date === matchDate).map((item) => String(item.registrationId || "")));
   const dateRegistrationIds = new Set(dateRegistrations.map((item) => String(item.id || "")));
@@ -2867,7 +2909,7 @@ function renderFinalScoreTable() {
     const hasDateResult = Boolean(saved || legacyCurrent);
     const datePoints = hasDateResult ? (resultSource.finalScore ?? "—") : "—";
     const removeAction = hasDateResult
-      ? `<button class="btn small ghost danger" type="button" data-result-delete="${escapeHtml(reg.id)}" data-result-date="${escapeHtml(matchDate)}" aria-label="Remove saved leaderboard result for ${escapeHtml(reg.teamName || "entry")} on ${escapeHtml(formatIsoDate(matchDate))}">Remove result</button>`
+      ? `<button class="btn small ghost danger" type="button" data-result-delete="${escapeHtml(reg.id)}" data-result-date="${escapeHtml(matchDate)}" aria-label="Delete saved leaderboard result for ${escapeHtml(reg.teamName || "entry")} on ${escapeHtml(formatIsoDate(matchDate))}">Delete result</button>`
       : `<span aria-label="No saved result">—</span>`;
     return `<tr><td><b>${slotLabel(reg)}</b></td><td><strong>${escapeHtml(reg.teamName || "-")}</strong><br><small>${playerListHtml(reg)}</small></td><td>${escapeHtml(reg.modeLabel || "-")} · ${escapeHtml(registrationFormatLabel(reg) || reg.variant || "-")}<br><small>${escapeHtml(reg.scheduleTime || "")}</small></td><td>${resultControl}</td><td><b>${escapeHtml(datePoints)}</b></td><td>${removeAction}</td></tr>`;
   }).join("");

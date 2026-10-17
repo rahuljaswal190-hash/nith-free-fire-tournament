@@ -28,7 +28,7 @@
 
 ## Verification performed in the workspace
 
-- `python3 -m unittest discover -s . -p 'test_server_api.py'` — **47 tests passed**, including Vercel rewrite dispatch, session signature/expiry, the optional fail-closed MongoDB flag, and result deletion auth/scope/score synchronization. MongoDB tests use a fake collection; they do not connect to a live cluster.
+- `python3 -m unittest discover -s . -p 'test_server_api.py'` — **48 tests passed**, including Vercel rewrite dispatch, session signature/expiry, the optional fail-closed MongoDB flag, the visible admin delete control, and result deletion auth/scope/score synchronization. MongoDB tests use a fake collection; they do not connect to a live cluster.
 - `python3 -m py_compile server.py dispatch.py test_server_api.py` — passed.
 - `node --check site.js` and `node --check data.js` — passed.
 - `python3 -m json.tool vercel.json` and `git diff --check` — passed.

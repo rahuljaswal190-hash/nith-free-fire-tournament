@@ -1,6 +1,6 @@
-# NIT Hamirpur Free Fire Tournament — Final Update 2.10 (Vercel-ready)
+# NIT Hamirpur Free Fire Tournament — Update 2.11 (Vercel-ready)
 
-**Current GitHub-root build:** this flat repository retains the tournament, fee, Vercel, authentication, storage, and visual updates through 2.10. The latest admin addition removes one entry's saved leaderboard result for the selected match date only, preserving the registration and all results from other dates.
+**Update 2.11:** this flat GitHub-root project includes a prominent admin-only control to delete one entry's saved leaderboard result for the selected match date only, preserving the registration and all results from other dates. The existing tournament, fee, Vercel, authentication, storage, and visual requirements are retained.
 
 A mobile-first website for a **student-organized** Free Fire tournament around NIT Hamirpur. The site does not claim institute, Garena, or Free Fire approval or endorsement.
 
@@ -109,7 +109,7 @@ For other hosts, point `TOURNAMENT_DATA_DIR` at the host’s persistent mounted 
 5. **Verify a registration:** review the submitted UTR/reference and manually confirm payment. QR/UPI instructions do **not** provide automatic payment verification; paid entries stay pending until the organizer approves them.
 6. **Edit or remove registrations:** “Edit names” lets the admin correct the entry/team and roster IGN names, including emoji and symbol names. Teammates can be removed from the roster. “Remove” deletes the registration and releases its slot.
 7. **Use the registration calendar:** choose a month and click any day, including a date with no registrations. Registration counts and saved leaderboard-result counts are shown separately; date-specific empty states are displayed. Calendar selection also updates the result-entry date. Dates use India Standard Time.
-8. **Publish/manage dated results:** select any match date, then enter BR kills and placement (1–12) for each of the 3 matches or CS Win/Loss and round difference. Results are archived by date. Re-saving a past date updates only that date and does not replace a newer match result. Use the row's **Remove result** action to delete only that entry/date's result; the registration and results from all other dates remain. The authenticated `POST /api/admin/delete-match-result` endpoint backs this action. BR points are kills plus the placement points in `data.js`; CS wins = 3 points, losses = 0.
+8. **Publish/manage dated results:** select any match date, then enter BR kills and placement (1–12) for each of the 3 matches or CS Win/Loss and round difference. Results are archived by date. Re-saving a past date updates only that date and does not replace a newer match result. To delete, use the dedicated **Delete a saved leaderboard result** selector in the Admin panel: choose an entry for the selected date, then press **Delete Saved Leaderboard Result** (or use that row's **Delete result** action). The public leaderboard is read-only. Deletion removes only that entry/date result; the registration and results from all other dates remain. The authenticated `POST /api/admin/delete-match-result` endpoint backs this action. BR points are kills plus the placement points in `data.js`; CS wins = 3 points, losses = 0.
 9. **Manage room details:** select the correct mode, format/team size, current fee, and Normal/One Tap type before saving a Room ID/password and optional QR. “Remove Saved Room Details” unpublishes and deletes only those credentials; registrations remain unchanged.
 10. **Choose the public default:** select either the latest saved match date or all-time cumulative standings. Visitors can also enter any date on the public leaderboard; unavailable dates show a clear empty state.
 11. **Read save confirmations:** successful admin actions show a compact auto-dismiss toast for about 2.5 seconds. Failed saves show an error toast and do not show a success confirmation.
@@ -143,7 +143,7 @@ All-time BR totals add the saved date totals; the match cells show the most rece
 - `requirements.txt` — PyMongo SRV driver
 - `.gitignore` — excludes environment secrets, runtime JSON/backups and local tool files
 - `README.md`, `PHONE_EDITING_GUIDE.md`, `SECURITY_AUDIT.md` — deployment, auth, storage, backup and verification guidance
-- Root-level `test_server_api.py` — 47 API/security regressions, including selected-date result deletion
+- Root-level `test_server_api.py` — 48 API/security regressions, including the visible selected-date result delete control
 
 ## Tests
 

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Panel | NIT Hamirpur Free Fire Tournament</title>
   <meta name="description" content="Admin tools for timings, registration edits, QR payments, room details, and verified match results." />
-  <link rel="stylesheet" href="styles.css?v=20261017-final-update-2-10-result-delete" />
+  <link rel="stylesheet" href="styles.css?v=20261017-update-2-11-admin-delete-control" />
 </head>
 <body data-page="admin" id="top">
 <a class="skip-link" href="#main-content">Skip to content</a>
@@ -175,7 +175,13 @@
         <h2>Enter verified match results</h2>
         <p>Select a date in the calendar above or use the date field. For each approved BR entry, enter kills and placement in all 3 matches; for CS, enter Win/Loss and round difference. Save to archive results for that date. Historical edits do not overwrite newer results.</p>
         <label class="result-date-control">Match date (IST)<input id="admin-result-date" type="date" /></label>
-        <p class="disclaimer">Results are archived by this date. Selecting an earlier date loads that day's saved values for correction without overwriting newer match results. Use a row's <b>Remove result</b> action to delete only that entry's saved result for the selected date; its registration and results from other dates remain.</p>
+        <p class="disclaimer">Results are archived by this date. Selecting an earlier date loads that day's saved values for correction without overwriting newer match results.</p>
+        <h3>Delete a saved leaderboard result</h3>
+        <p class="disclaimer" id="delete-result-help">Choose the match date above, then select an entry with a saved result for that date. This admin-only action deletes only that entry's result for the selected date; the registration and all other dates remain.</p>
+        <div class="field-grid">
+          <label for="admin-delete-result-registration">Saved result to delete<select id="admin-delete-result-registration" aria-describedby="delete-result-help" disabled><option value="">No saved results for selected date</option></select></label>
+        </div>
+        <div class="admin-actions"><button class="btn small danger" id="delete-selected-match-result" type="button" aria-describedby="delete-result-help" disabled>Delete Saved Leaderboard Result</button></div>
         <div id="final-score-table"></div>
         <div class="admin-actions"><button class="btn small" id="save-final-scores" type="button">Save Match Results</button></div>
       </article>
@@ -248,7 +254,7 @@
   </div>
   <a href="#top">Back to top ↑</a>
 </footer>
-<script src="data.js?v=20261017-final-update-2-10-result-delete"></script>
-<script src="site.js?v=20261017-final-update-2-10-result-delete"></script>
+<script src="data.js?v=20261017-update-2-11-admin-delete-control"></script>
+<script src="site.js?v=20261017-update-2-11-admin-delete-control"></script>
 </body>
 </html>
